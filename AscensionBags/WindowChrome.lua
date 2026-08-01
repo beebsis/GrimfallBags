@@ -19,9 +19,9 @@ local B = AscensionBags
 -- a bare Interface\AddOns\ entry would suggest. Textures get no such
 -- help: the path has to match the real folder layout on disk under the
 -- client root exactly, which here is Interface\AddOns\AscensionBags\
--- AscensionBags\Assets\ (the working directory this addon's dev files
--- live in already IS ...\Interface\AddOns\AscensionBags\).
-B.ASSETS = "Interface\\AddOns\\AscensionBags\\AscensionBags\\Assets\\"
+-- Assets\ (a single AscensionBags folder directly under Interface\AddOns\,
+-- matching how the addon is actually installed).
+B.ASSETS = "Interface\\AddOns\\AscensionBags\\Assets\\"
 
 B.PANEL_BD = {
     bgFile=B.ASSETS.."Skins\\dark-backgroundfile",
