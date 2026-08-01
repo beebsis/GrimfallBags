@@ -1,6 +1,6 @@
 # AscensionBags
 
-A from-scratch bag, bank, and guild bank replacement for **World of Warcraft 3.3.5a** on **[Ascension](https://ascension.gg/)**, inspired by the retail addon [Baganator](https://www.curseforge.com/wow/addons/baganator) but independently implemented (no ported/third-party code).
+A bag, bank, and guild bank replacement for **World of Warcraft 3.3.5a** on **[Ascension](https://ascension.gg/)**, based on the retail addon [Baganator](https://www.curseforge.com/wow/addons/baganator) - there was never a 3.3.5a version, only retail, so this brings it to 3.3.5a and continues it with new features and fixes.
 
 ## Features
 
