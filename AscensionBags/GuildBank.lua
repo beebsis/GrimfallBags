@@ -10,7 +10,6 @@ local S = Syndicator335
 local Log, Guard = B.Log, B.Guard
 
 local GB_COLS   = 14
-local GB_MAX_COLS = 6   -- columns are width-driven but capped, see RefreshGuildBank
 local GB_SLOTS  = 98
 local BTN       = 37    -- matches the standard in-game bag icon size, fixed
 local BTN_PAD   = 2
@@ -210,7 +209,8 @@ function B.RefreshGuildBank()
     Guard("RefreshGuildBank", function()
         -- GB_COLS (used only by the flat GRID mode below) is derived
         -- from the frame's live width, uncapped. The category-view
-        -- packing further down uses GB_MAX_COLS separately.
+        -- packing further down computes its own per-block cap the same
+        -- way, see maxBlockCols below.
         GB_COLS = math.max(1, math.floor((frame:GetWidth() - PAD * 2 + BTN_PAD) / (BTN + BTN_PAD)))
 
         local guild = S.Guild()
@@ -335,19 +335,21 @@ function B.RefreshGuildBank()
             end
 
             -- Flow layout: same left-to-right packing as the bag
-            -- window - each category is its own block (header + grid
-            -- wrapped internally at GB_MAX_COLS wide), blocks pack
-            -- side by side using the window's actual width and only
-            -- drop to a new row when the next block no longer fits.
+            -- window - each category is its own block (header + grid),
+            -- only wrapped internally to a second row if it has more
+            -- items than fit across the whole window in one go. Blocks
+            -- pack side by side using the window's actual width and
+            -- only drop to a new row when the next block no longer fits.
             local HEADER_H   = 16
             local BLOCK_GAP  = 14
             local availWidth = frame:GetWidth() - PAD * 2
+            local maxBlockCols = math.max(1, math.floor((availWidth + BTN_PAD) / (BTN + BTN_PAD)))
             local y = gridTop
             local rowX, rowH = 0, 0
             for _, cat in ipairs(order) do
                 local slotList = groups[cat]
                 local n = #slotList
-                local blockCols = math.min(n, GB_MAX_COLS)
+                local blockCols = math.min(n, maxBlockCols)
                 local rows = math.ceil(n / blockCols)
 
                 local hdr = frame.AcquireHeader()

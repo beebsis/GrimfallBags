@@ -10,10 +10,9 @@ local Log, Guard = B.Log, B.Guard
 
 -- Layout constants. BTN (icon size) matches the standard in-game bag
 -- icon size and isn't user-configurable. COLS is derived live from the
--- window's width (flexbox-style wrap, see SyncLayoutConstants), capped
--- at MAX_COLS so widening the window doesn't stretch rows indefinitely.
+-- window's width (flexbox-style wrap, see SyncLayoutConstants), uncapped -
+-- widening the window just fits more per row.
 local COLS, BTN = 12, 37
-local MAX_COLS  = 6
 local BTN_PAD   = 2
 local PAD       = 10
 local TITLE_H   = 24
@@ -452,7 +451,8 @@ end
 -- COLS (used by the flat single-list/grid view, where there are no
 -- category blocks to pack) is derived from the frame's current width,
 -- uncapped - recomputed on every refresh, including live during a
--- resize drag. The category view uses MAX_COLS separately, see below.
+-- resize drag. The category view computes its own per-block cap the
+-- same way, see maxBlockCols below.
 local function SyncLayoutConstants(view)
     COLS = math.max(1, math.floor((view.f:GetWidth() - PAD * 2 + BTN_PAD) / (BTN + BTN_PAD)))
 end
@@ -661,12 +661,14 @@ local function RefreshImpl(view)
         if present[EMPTY_LABEL] then seq[#seq+1] = {cat = EMPTY_LABEL} end
 
         -- Flow layout: real CSS-flexbox-style wrap. Each category is
-        -- its own block (header + icon grid, itself wrapped internally
-        -- at MAX_COLS icons wide). Blocks pack left to right using the
+        -- its own block (header + icon grid), only wrapped internally
+        -- to a second row if it has more items than fit across the
+        -- whole window in one go. Blocks pack left to right using the
         -- window's actual width and only drop to a new row when the
         -- next block no longer fits in the remaining space - NOT one
         -- category per row like a plain column grid would give you.
-        local availWidth = view.f:GetWidth() - PAD * 2
+        local availWidth  = view.f:GetWidth() - PAD * 2
+        local maxBlockCols = math.max(1, math.floor((availWidth + BTN_PAD) / (BTN + BTN_PAD)))
         local BLOCK_GAP  = 14
         local rowX, rowH = 0, 0
         local function NewRow()
@@ -708,7 +710,7 @@ local function RefreshImpl(view)
             local n = items and #items or 0
             if n == 0 then return end
 
-            local blockCols = math.min(n, MAX_COLS)
+            local blockCols = math.min(n, maxBlockCols)
             local rows = math.ceil(n / blockCols)
 
             local hdr = AcquireHeader(view)
