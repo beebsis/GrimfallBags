@@ -1,0 +1,20 @@
+## Interface: 30300
+## Title: Ascension Bags
+## Notes: Bags/Bank/Guild Bank in category or single-list view | WoW 3.3.5a / Ascension
+## Author: Beebsis
+## Version: 0.7a
+## RequiredDeps: Syndicator335
+## SavedVariables: AscensionBagsConfig
+
+Core.lua
+WindowChrome.lua
+ElvUISkin.lua
+IOWindow.lua
+Profiles.lua
+Json.lua
+Categories.lua
+Views.lua
+GuildBank.lua
+Sorting.lua
+Transfers.lua
+Options.lua

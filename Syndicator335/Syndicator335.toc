@@ -1,0 +1,11 @@
+## Interface: 30300
+## Title: Syndicator335
+## Notes: Data layer: inventory tracking for all characters, search, tooltips | WoW 3.3.5a / Ascension
+## Author: Syndicator
+## Version: 1.0.0
+## SavedVariables: Syndicator335Data
+
+Core.lua
+Tracking.lua
+Search.lua
+Tooltips.lua
