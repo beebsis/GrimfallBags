@@ -875,6 +875,7 @@ end
 ---------------------------------------------------------------------------
 local function AddToolbar(view, isBank)
     local f = view.f
+    local tmogBtn   -- set below (bag window only), referenced later by bagsBtn's anchor
 
     -- Icons on the right: sort, view, categories, options
     local gear = B.TitleIconButton(f, B.ASSETS.."Cog",
@@ -912,11 +913,11 @@ local function AddToolbar(view, isBank)
 
     -- Collect all transmog appearances from bag items (bag window only -
     -- this is a live bag operation, not something offline character
-    -- views or the bank window need). NOTE: "INV_Misc_Statue_02" is an
-    -- unverified icon guess (no matching custom asset was provided) -
-    -- flag if it renders blank.
+    -- views or the bank window need). Uses the built-in "INV_Misc_Statue_02"
+    -- icon since no custom asset was made for this button - renders fine,
+    -- just looks like a small golden urn/sack at this size.
     if not isBank then
-        local tmogBtn = B.TitleIconButton(f, "Interface\\Icons\\INV_Misc_Statue_02",
+        tmogBtn = B.TitleIconButton(f, "Interface\\Icons\\INV_Misc_Statue_02",
             "Collect all transmog appearances from bags", function()
                 if view.offline then return end
                 B.Guard("CollectAllTransmog", CollectAllTransmog)
@@ -1176,9 +1177,7 @@ local function AddToolbar(view, isBank)
                 cfg.showBagRow = not cfg.showBagRow
                 view.UpdateBagRow()
             end)
-        bagsBtn:SetPoint("LEFT", f:GetName() and select(1, f:GetRegions()) and f or f, "TOPLEFT", PAD + 20, -(PAD + 8))
-        bagsBtn:ClearAllPoints()
-        bagsBtn:SetPoint("RIGHT", transBtn, "LEFT", -3, 0)
+        bagsBtn:SetPoint("RIGHT", tmogBtn, "LEFT", -3, 0)
     end
 
     -- Money (bag window only)
