@@ -2,7 +2,7 @@
 ## Title: Ascension Bags
 ## Notes: Bags/Bank/Guild Bank in category or single-list view | WoW 3.3.5a / Ascension
 ## Author: Beebsis
-## Version: 0.7a
+## Version: 1.0.0
 ## RequiredDeps: Syndicator335
 ## SavedVariables: AscensionBagsConfig
 
