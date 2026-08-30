@@ -2,6 +2,11 @@
 
 A bag, bank, and guild bank replacement for **World of Warcraft 3.3.5a** on **Grimfall**, based on the retail addon [Baganator](https://www.curseforge.com/wow/addons/baganator) - there was never a 3.3.5a version, only retail, so this brings it to 3.3.5a and continues it with new features and fixes.
 
+## Branches
+
+- `main` (this branch) - the addon, ready to install, comment-stripped, tagged (`v1.2.0`, etc.) for every version
+- `developer` - full source with comments, where active work happens; go there if you want to contribute
+
 ## Features
 
 - **Category or single-list view**, with a flexbox-style flow layout that reflows to the window's width
@@ -18,14 +23,7 @@ A bag, bank, and guild bank replacement for **World of Warcraft 3.3.5a** on **Gr
 - **ElvUI integration** - detects ElvUI on login and asks which addon should own your bags/bank/guild bank, plus an optional skin that matches ElvUI's look
 - Item level display and "New" item highlighting on item icons
 
-Bulk transmog-appearance collection is present in the code but currently disabled (commented out, not deleted) - Grimfall doesn't have a transmog system yet. See [Notes for contributors](#notes-for-contributors).
-
-## Branches
-
-- `developer` (this branch) - full source with comments, where active work happens
-- `main` - the default branch, a comment-stripped build kept in sync with `developer` at each release, tagged (`v1.2.0`, etc.) for every version
-
-If you just want to install the addon, use `main` or a tagged release. This branch is for development.
+Bulk transmog-appearance collection is not currently available - Grimfall doesn't have a transmog system yet.
 
 ## Requirements
 
@@ -34,9 +32,21 @@ If you just want to install the addon, use `main` or a tagged release. This bran
 
 ## Installation
 
-1. Copy both the `GrimfallBags` and `Syndicator335` folders into your `Interface/AddOns/` directory.
-2. Fully restart the WoW client (see [Notes for contributors](#notes-for-contributors) - `/reload` alone is not always enough right after adding new files).
-3. Enable both addons on the character-select AddOns screen.
+1. Download this repo.
+   - Release: go to [releases](https://github.com/beebsis/GrimfallBags/releases) and download the latest version and unzip it.
+2. Copy both the `GrimfallBags` and `Syndicator335` folders into your `Interface/AddOns/` directory. Both are required - GrimfallBags is a pure UI layer on top of Syndicator335's data tracking, and won't work without it. After copying, you should have `Interface/AddOns/GrimfallBags/` and `Interface/AddOns/Syndicator335/` sitting side by side, each with its own `.toc` file directly inside it.
+3. Fully restart the WoW client (see [Notes](#notes) - `/reload` alone is not always enough right after adding new files).
+4. Enable both addons on the character-select AddOns screen.
+5. Log in. Use `/gfbags` (or `/gbags`) to open the bag window, and `/gfbags options` to open settings.
+
+### Updating
+
+Download the latest version the same way and overwrite both folders. Your saved settings, categories, and profiles are stored separately by the WoW client and are not affected by overwriting the addon files.
+
+### Troubleshooting
+
+- "attempt to call a nil value" errors right after installing: you likely only used `/reload`. Do a full client restart instead.
+- Bags window will not open: make sure both `GrimfallBags` and `Syndicator335` are enabled on the character-select AddOns screen, not just one of them.
 
 ## Usage
 
@@ -100,34 +110,8 @@ Priority (top of the list wins) determines match order and is independent of sec
   - `Options.lua` - the customize window (tabs + sidebar)
   - `Assets/` - custom icons and window-skin textures
 - `Syndicator335/` - data layer: bag/bank/mail/currency tracking, search engine
-- `tools/build_release.py` - generates a comment-stripped copy in `dist/` for releases (see below)
 
-## Building a release
-
-Source files keep their comments for development on this branch. To cut a release onto
-`main`:
-
-```bash
-python tools/build_release.py
-```
-
-This writes a full copy of `GrimfallBags/` and `Syndicator335/` into `dist/`, with Lua
-comments removed (both whole-line and inline trailing comments) and everything else
-(`.toc`, `Assets/`) copied unchanged. Your working source is never modified. `dist/` is
-git-ignored - regenerate it whenever you cut a release.
-
-Then check out `main`, copy `dist/GrimfallBags/` and `dist/Syndicator335/` over the
-existing folders, bump the version in `GrimfallBags.toc` and `Core.lua`, commit, and tag
-the commit (e.g. `git tag v1.2.1`). Push both the commit and the tag, then create a
-GitHub Release from that tag.
-
-Note: the stripper bails out and copies a file as-is (with a warning) if it contains a
-`[[` long-bracket string or block comment, rather than risk mishandling one. `Views.lua`
-currently has a `--[[ ]]` block comment (the disabled transmog button) and will ship
-un-stripped in `dist/` as a result - still valid, just not comment-free like the rest.
-
-## Notes for contributors
+## Notes
 
 - **This Grimfall client build does not reliably pick up a brand-new `.lua` file added to an already-loaded addon via `/reload`.** If you add a file and list it in the `.toc`, do a full client restart (exit to desktop and relaunch, or at minimum log out to the character-select screen) - otherwise you'll see "attempt to call a nil value" errors for anything defined only in the new file. Edits to *existing* files reload fine.
-- **Texture paths are literal filesystem paths**, not resolved through the addon manager - `Interface\AddOns\<folder>\...` has to match the real on-disk layout under the client root exactly. This tripped us up because `RequiredDeps: Syndicator335` in the `.toc` resolves fine as a bare name (that goes through addon-metadata resolution), but a texture at the same nominal depth does not.
 - `Assets/Currency.tga`, `Guild.tga`, `GuildTabLogs.tga`, `GuildTabText.tga`, `Chest.tga`, `Everything.tga`, `logo.tga`, `bag_keys.tga`, `bag_soul_shard.tga`, `classic-bag-slot.tga`, `equipment-set-shield.tga`, and `arrow.tga` are provided but currently unused - reserved for features not yet wired up (e.g. a keyring/soul-shard bag icon, a protected-item shield indicator, section-header collapse arrows).

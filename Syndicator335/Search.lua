@@ -1,27 +1,7 @@
----------------------------------------------------------------------------
--- Syndicator335 - Search
--- Query language (own implementation):
---   Free text         substring of the item name
---   a & b             both must match
---   a | b             either must match
---   !a                must not match
---   ( ... )           parentheses
---   >200 <100 =150    item-level comparison
---   200-210           item-level range
---   quality words      poor, common, uncommon, rare, epic, legendary
---   Keywords          boe, bop, soulbound, bou, junk, equipment,
---                     reagent, food, potion, quest, recipe, weapon, armor
---
--- Item data format for Matches: {l=Link, c=Count, t=Texture, q=Quality}
--- Extra info is lazily pulled from GetItemInfo(link).
----------------------------------------------------------------------------
 local S = Syndicator335
 
 S.Search = {}
 
----------------------------------------------------------------------------
--- Prepare item info for search (with a small per-entry cache)
----------------------------------------------------------------------------
 local infoCache = setmetatable({}, {__mode = "k"})
 
 local function GetInfo(entry)
@@ -43,9 +23,6 @@ local function GetInfo(entry)
     return info
 end
 
----------------------------------------------------------------------------
--- Quality words: localized Blizzard strings + English names
----------------------------------------------------------------------------
 local QUALITY_WORDS = {}
 do
     local english = {"poor", "common", "uncommon", "rare", "epic",
@@ -57,23 +34,13 @@ do
     end
 end
 
----------------------------------------------------------------------------
--- Keywords: name (aliases) -> check function(info, entry)
----------------------------------------------------------------------------
--- Bind-status is a property of the item definition, not of a
--- particular stack, so we cache the tooltip-scan result per itemID
--- (not per entry). This matters a lot for "search everywhere": the
--- same itemID can appear in dozens of stacks across many tracked
--- characters, and without this cache each one would trigger its own
--- synchronous SetHyperlink() tooltip scan.
-local bindLineCache = {}   -- [itemID] = {[pattern] = true/false}
+local bindLineCache = {}
 
 local function TooltipHasLine(link, pattern)
     local id = S.ItemID(link)
     local cached = id and bindLineCache[id] and bindLineCache[id][pattern]
     if cached ~= nil then return cached end
 
-    -- hidden scan tooltip for bind checks
     local tt = S.scanTip
     if not tt then
         tt = CreateFrame("GameTooltip", "Syndicator335ScanTip", nil, "GameTooltipTemplate")
@@ -96,13 +63,7 @@ local function TooltipHasLine(link, pattern)
     return found
 end
 
--- Full tooltip text (stats, "of the X" suffixes, socket colors, flavor
--- text, ...), not just the first 5 lines used for bind-status above -
--- this is what lets free-text search match something like "spirit" on
--- an item whose NAME doesn't contain that word. Same per-itemID caching
--- rationale: tooltip content is intrinsic to the item definition, not
--- the stack, so one scan covers every copy of that item everywhere.
-local tooltipTextCache = {}   -- [itemID] = "all tooltip lines, lowercased, newline-joined"
+local tooltipTextCache = {}
 
 local function GetTooltipText(link)
     local id = S.ItemID(link)
@@ -129,8 +90,6 @@ local function GetTooltipText(link)
     return joined
 end
 
--- Bind status/tooltip text can't change without a relog/item swap, but
--- wipe on login just in case a custom server changes item data underfoot.
 local wiper = CreateFrame("Frame")
 wiper:RegisterEvent("PLAYER_LOGIN")
 wiper:SetScript("OnEvent", function()
@@ -161,11 +120,8 @@ AddKeyword(function(info, entry)
 end, "bou")
 AddKeyword(function(info, entry) return entry.isNew == true end, "new")
 
--- Item-type keywords via the localized Auction House classes: works
--- automatically in any language and with CoA customisations
 do
     local classes = {GetAuctionItemClasses()}
-    -- English aliases in order of the 3.3.5a class IDs
     local english = {"weapon", "armor", "container", "consumable", "glyph",
                      "trade goods", "projectile", "quiver", "recipe",
                      "gem", "miscellaneous", "quest"}
@@ -176,13 +132,9 @@ do
     end
 end
 
----------------------------------------------------------------------------
--- Evaluate a single term
----------------------------------------------------------------------------
 local function MatchTerm(entry, term)
     local info = GetInfo(entry)
 
-    -- Item level: >n, <n, =n, n-m
     local op, num = term:match("^([<>=])(%d+)$")
     if op then
         num = tonumber(num)
@@ -195,16 +147,12 @@ local function MatchTerm(entry, term)
         return info.ilvl >= tonumber(lo) and info.ilvl <= tonumber(hi)
     end
 
-    -- Quality
     local q = QUALITY_WORDS[term]
     if q ~= nil then return info.quality == q end
 
-    -- Keyword
     local kw = KEYWORDS[term]
     if kw then return kw(info, entry) or false end
 
-    -- Free text: name, type, subtype, or anywhere in the tooltip (stats
-    -- like "spirit", set/suffix names, socket colors, ...)
     if info.name:find(term, 1, true) or info.itemType:find(term, 1, true)
        or info.subType:find(term, 1, true) then
         return true
@@ -216,12 +164,6 @@ local function MatchTerm(entry, term)
     return false
 end
 
----------------------------------------------------------------------------
--- Query parser: recursive descent over |, &, !, ( )
---   expr   := andExp { "|" andExp }
---   andExp := unary  { "&" unary }
---   unary  := "!" unary | "(" expr ")" | term
----------------------------------------------------------------------------
 local function Tokenize(query)
     local tokens = {}
     local buf = ""
@@ -243,7 +185,7 @@ local function Tokenize(query)
     return tokens
 end
 
-local ParseExpr   -- forward
+local ParseExpr
 
 local function ParseUnary(tokens, pos, entry)
     local tok = tokens[pos]
@@ -255,7 +197,7 @@ local function ParseUnary(tokens, pos, entry)
         if tokens[np] == ")" then np = np + 1 end
         return val, np
     elseif tok == nil or tok == ")" or tok == "&" or tok == "|" then
-        return true, pos   -- empty term matches everything
+        return true, pos
     else
         return MatchTerm(entry, tok:lower()), pos + 1
     end
@@ -281,10 +223,6 @@ ParseExpr = function(tokens, pos, entry)
     return val, np
 end
 
----------------------------------------------------------------------------
--- Public search API
----------------------------------------------------------------------------
--- entry = {l=Link, c=Count, t=Texture, q=Quality}
 function S.Search.Matches(entry, query)
     if not query or query == "" then return true end
     if not entry or not entry.l then return false end
@@ -296,8 +234,6 @@ function S.Search.Matches(entry, query)
     return ok and result or false
 end
 
--- Search everywhere: all characters/sources, result as a list
--- { {char=..., source=..., entry=...}, ... }
 function S.Search.Everywhere(query)
     local results = {}
     local function scanSet(charKey, source, set)

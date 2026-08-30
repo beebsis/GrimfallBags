@@ -1,9 +1,3 @@
----------------------------------------------------------------------------
--- Syndicator335 - Tooltips
--- Appends lines to every item tooltip: per character, how many of
--- that item they own, broken down by source (bags, bank, mail,
--- equipped, auctions) plus guild bank lines.
----------------------------------------------------------------------------
 local S = Syndicator335
 
 local SOURCE_LABELS = {
@@ -13,7 +7,6 @@ local SOURCE_LABELS = {
     equipped = STATUS_TEXT_TARGET and "Equipped" or "Equipped",
     auctions = AUCTIONS or "AH",
 }
--- prefer a localized label where Blizzard has no short one
 SOURCE_LABELS.equipped = EQUIPPED or "Equipped"
 
 local SOURCE_ORDER = {"bags", "bank", "mail", "equipped", "auctions"}
@@ -39,7 +32,6 @@ local function AddCounts(tt)
                 end
             end
             if sum > 0 then
-                -- name in class color
                 local r, g, b = 0.35, 0.7, 1
                 local cc = c.class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[c.class]
                 if cc then r, g, b = cc.r, cc.g, cc.b end

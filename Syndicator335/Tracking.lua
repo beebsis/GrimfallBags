@@ -1,9 +1,3 @@
----------------------------------------------------------------------------
--- Syndicator335 - Tracking
--- Watches every ownership source via events and writes it into the
--- SavedVariables. One scan per source, batched through a dirty-flag
--- mechanism (BAG_UPDATE often fires several times per frame).
----------------------------------------------------------------------------
 local S = Syndicator335
 local Log, Guard = S.Log, S.Guard
 
@@ -13,12 +7,6 @@ local BANK_BAGS   = {-1, 5, 6, 7, 8, 9, 10, 11}
 local bankIsOpen  = false
 local mailIsOpen  = false
 
----------------------------------------------------------------------------
--- Scanner
--- Slot format everywhere: {l=Link, c=Count, t=Texture, q=Quality}
--- Texture/quality are stored alongside because GetItemInfo returns
--- nil for uncached items right after a relog.
----------------------------------------------------------------------------
 local function ScanContainers(bags)
     local t = {}
     for _, bag in ipairs(bags) do
@@ -55,7 +43,6 @@ local function ScanMail()
     local t = {}
     local n = GetInboxNumItems() or 0
     for i = 1, n do
-        -- 3.3.5a: up to 12 attachments per mail
         for att = 1, ATTACHMENTS_MAX_RECEIVE or 12 do
             local name, tex, cnt = GetInboxItem(i, att)
             if name then
@@ -82,9 +69,6 @@ local function ScanAuctions()
     return t
 end
 
----------------------------------------------------------------------------
--- Rebuild the count index (itemID -> count per source)
----------------------------------------------------------------------------
 local function CountInto(counts, source, entry)
     local id = S.ItemID(entry.l)
     if not id then return end
@@ -124,9 +108,6 @@ local function RebuildGuildCounts(guild)
     guild.counts = counts
 end
 
----------------------------------------------------------------------------
--- Update functions (one source each)
----------------------------------------------------------------------------
 local function UpdateBags()
     local c = S.Char()
     c.bags     = ScanContainers(PLAYER_BAGS)
@@ -158,13 +139,12 @@ local function UpdateAuctions()
     RebuildCounts(c)
 end
 
--- Guild bank: only scan the requested/changed tab
 local function UpdateGuildBankTab(tab)
     local g = S.Guild()
     if not g then return end
     local name = GetGuildBankTabInfo(tab)
     local t = {name = name}
-    for slot = 1, 98 do   -- MAX_GUILDBANK_SLOTS_PER_TAB
+    for slot = 1, 98 do
         local link = GetGuildBankItemLink(tab, slot)
         if link then
             local tex, cnt = GetGuildBankItemInfo(tab, slot)
@@ -176,10 +156,7 @@ local function UpdateGuildBankTab(tab)
     RebuildGuildCounts(g)
 end
 
----------------------------------------------------------------------------
--- Events + batching
----------------------------------------------------------------------------
-local dirty = {}   -- {bags=true, equipped=true, ...}
+local dirty = {}
 local evt = CreateFrame("Frame")
 
 evt:RegisterEvent("PLAYER_LOGIN")
@@ -262,8 +239,6 @@ evt:SetScript("OnEvent", function(self, event, arg1)
         dirty.auctions = true
 
     elseif event == "GUILDBANKFRAME_OPENED" then
-        -- AscensionBags queries tabs throttled (one every half
-        -- second); we only listen for GUILDBANKBAGSLOTS_CHANGED.
         Log("Guild bank opened")
 
     elseif event == "GUILDBANKBAGSLOTS_CHANGED" then

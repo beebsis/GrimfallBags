@@ -1,20 +1,8 @@
----------------------------------------------------------------------------
--- Syndicator335 - Core
--- Data layer for WoW 3.3.5a / Ascension: Conquest of Azeroth.
--- Independent reimplementation following the operating principle of
--- Syndicator (see ANALYSE.txt) - no third-party code.
---
--- Stores per character: bags, bank, mail, equipment, auctions, gold;
--- per guild: guild bank. Provides search and tooltip lines.
----------------------------------------------------------------------------
 local S = {}
 _G["Syndicator335"] = S
 
 S.VERSION = "1.0.0"
 
----------------------------------------------------------------------------
--- Log:  /syn335 log
----------------------------------------------------------------------------
 local LOG_MAX = 200
 S.log = {}
 
@@ -36,24 +24,6 @@ function S.Guard(label, fn, ...)
     return ok
 end
 
----------------------------------------------------------------------------
--- Data access
--- Syndicator335Data = {
---   chars  = { ["Name - Realm"] = {
---       class, faction, money, lastSeen,
---       bags   = { [bagID]  = {size=n, [slot]={l,c,t,q}} },
---       bank   = { [bagID]  = {size=n, [slot]={l,c,t,q}} },
---       mail   = { {l,c,t,q}, ... },
---       equipped = { [invSlot] = {l,c,t,q} },
---       auctions = { {l,c,t,q}, ... },
---       counts = { [itemID] = {bags=n, bank=n, mail=n, equipped=n, auctions=n} },
---   } },
---   guilds = { ["Guild - Realm"] = {
---       money, tabs = { [tab] = {name=..., [slot]={l,c,t,q}} },
---       counts = { [itemID] = n },
---   } },
--- }
----------------------------------------------------------------------------
 function S.CharKey()
     return UnitName("player").." - "..GetRealmName()
 end
@@ -94,12 +64,8 @@ function S.Guild(key)
     return g
 end
 
----------------------------------------------------------------------------
--- Public API (for AscensionBags and other addons)
----------------------------------------------------------------------------
 S.API = {}
 
--- Sorted list of all known character keys
 function S.API.GetAllCharacters()
     local keys = {}
     for key in pairs(S.Data().chars) do keys[#keys+1] = key end
@@ -126,15 +92,11 @@ function S.API.DeleteCharacter(key)
     S.Data().chars[key] = nil
 end
 
--- Total count of an item across all sources of a character
 function S.API.CountsForItem(charData, itemID)
     local c = charData and charData.counts and charData.counts[itemID]
     return c
 end
 
----------------------------------------------------------------------------
--- Item ID from link
----------------------------------------------------------------------------
 function S.ItemID(link)
     return link and tonumber(link:match("item:(%d+)"))
 end
@@ -143,9 +105,6 @@ function S.ItemName(link)
     return link and link:match("%[(.-)%]") or ""
 end
 
----------------------------------------------------------------------------
--- Slash
----------------------------------------------------------------------------
 SLASH_SYNDICATOR3351 = "/syn335"
 SLASH_SYNDICATOR3352 = "/syndicator335"
 SlashCmdList["SYNDICATOR335"] = function(msg)
@@ -159,7 +118,6 @@ SlashCmdList["SYNDICATOR335"] = function(msg)
         print("|cff33aaff[Syndicator335]|r Log cleared.")
     elseif msg:match("^forget ") then
         local key = msg:gsub("^forget%s+", "")
-        -- case-insensitive match
         for k in pairs(S.Data().chars) do
             if k:lower() == key then
                 S.Data().chars[k] = nil
