@@ -1,25 +1,6 @@
----------------------------------------------------------------------------
--- AscensionBags - Json
--- Minimal, dependency-free JSON encode/decode for the addon's own
--- export/import strings (profiles + categories). Not a general-purpose
--- library - correct for the plain-old-data shapes we produce (strings,
--- numbers, booleans, arrays, objects), nothing exotic (no NaN/Infinity,
--- no deep unicode handling beyond \uXXXX).
---
--- WHY: the previous pipe/semicolon delimited format used "|" as a field
--- separator. WoW's text widgets treat "|" as a magic escape character
--- (|c, |r, |H, |T, ...) and can silently collapse a literal "||" down to
--- one "|" when text is displayed/copied through an EditBox - corrupting
--- any export string that happened to contain doubled pipes (which ours
--- always did, being empty-field markers). JSON's delimiters ({}[]:,")
--- aren't magic to WoW's renderer, so this class of corruption goes away.
----------------------------------------------------------------------------
-local B = AscensionBags
+local B = GrimfallBags
 B.Json = {}
 
----------------------------------------------------------------------------
--- Encode
----------------------------------------------------------------------------
 local ESCAPES = {
     ['"']  = '\\"',
     ['\\'] = '\\\\',
@@ -35,9 +16,6 @@ local function EncodeString(s)
     return '"'..out..'"'
 end
 
--- A Lua table is treated as a JSON array if every key is a positive
--- integer with no gaps (matches #t); otherwise it's an object. An empty
--- table always encodes as [] (our data never needs an empty {}).
 local function IsArray(t)
     local n = 0
     for k in pairs(t) do
@@ -47,7 +25,7 @@ local function IsArray(t)
     return n == #t
 end
 
-local Encode   -- forward
+local Encode
 local function EncodeValue(v)
     local t = type(v)
     if t == "string" then return EncodeString(v)
@@ -72,16 +50,12 @@ Encode = function(t)
 end
 B.Json.Encode = Encode
 
----------------------------------------------------------------------------
--- Decode (small recursive-descent parser)
----------------------------------------------------------------------------
 local function SkipWS(s, i)
     local _, e = s:find("^%s*", i)
     return e + 1
 end
 
 local function DecodeString(s, i)
-    -- i points just past the opening quote
     local out = {}
     while true do
         local c = s:sub(i, i)
@@ -107,7 +81,7 @@ local function DecodeString(s, i)
     end
 end
 
-local Decode   -- forward
+local Decode
 Decode = function(s, i)
     i = SkipWS(s, i)
     local c = s:sub(i, i)
@@ -162,9 +136,6 @@ Decode = function(s, i)
     end
 end
 
--- Returns (value, nil) on success, or (nil, errorMessage) on failure -
--- never throws, so a corrupted/pasted-wrong import string just fails
--- cleanly instead of raising a raw Lua error into the user's log.
 function B.Json.Decode(str)
     if not str or str == "" then return nil, "empty string" end
     local ok, result = pcall(Decode, str, 1)

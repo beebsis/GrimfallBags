@@ -1,20 +1,10 @@
----------------------------------------------------------------------------
--- AscensionBags - Customize window
--- ONE window with tabs like the original:
---   General | Sorting | Profiles | Categories
--- The categories tab embeds the two-column panel from Categories.lua.
--- Changes apply immediately; columns/icon size need a /reload.
----------------------------------------------------------------------------
-local B = AscensionBags
+local B = GrimfallBags
 
 local dialog
-local tabs = {}          -- {key = {btn=..., content=...}}
+local tabs = {}
 local activeTab
 
----------------------------------------------------------------------------
--- Profile dialog (ask for a name)
----------------------------------------------------------------------------
-StaticPopupDialogs["ASCBAGS_PROFILE_NEW"] = {
+StaticPopupDialogs["GFBAGS_PROFILE_NEW"] = {
     text = "Profile name:",
     button1 = ACCEPT or "Ok",
     button2 = CANCEL or "Cancel",
@@ -23,16 +13,13 @@ StaticPopupDialogs["ASCBAGS_PROFILE_NEW"] = {
         local name = _G[self:GetName().."EditBox"]:GetText()
         if name and name ~= "" then
             B.SaveCurrentAsProfile(name)
-            print("|cff33aaff[AscensionBags]|r Profile '"..name.."' saved.")
+            print("|cff33aaff[GrimfallBags]|r Profile '"..name.."' saved.")
         end
     end,
     EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
     timeout = 0, whileDead = 1, hideOnEscape = 1,
 }
 
----------------------------------------------------------------------------
--- Widget helpers
----------------------------------------------------------------------------
 local function MakeCheck(parent, label, get, set)
     local cb = CreateFrame("CheckButton", nil, parent)
     cb:SetWidth(20); cb:SetHeight(20)
@@ -53,7 +40,7 @@ local function MakeCheck(parent, label, get, set)
 end
 
 local function MakeSlider(parent, label, minV, maxV, step, get, set)
-    local name = "AscensionBagsSlider"..label:gsub("%W", "")
+    local name = "GrimfallBagsSlider"..label:gsub("%W", "")
     local sl = CreateFrame("Slider", name, parent, "OptionsSliderTemplate")
     sl:SetWidth(200); sl:SetHeight(16)
     sl:SetMinMaxValues(minV, maxV)
@@ -75,9 +62,6 @@ local function MakeSlider(parent, label, minV, maxV, step, get, set)
     return sl
 end
 
----------------------------------------------------------------------------
--- Tab contents
----------------------------------------------------------------------------
 local function BuildGeneralTab(c)
     local cfg = B.Config()
     local y = -10
@@ -162,7 +146,7 @@ local function BuildSortingTab(c)
         {value="quality", label="Quality"},
         {value="ilvl",    label="Item level"},
     }
-    local dd = CreateFrame("Frame", "AscensionBagsSortDD", c, "UIDropDownMenuTemplate")
+    local dd = CreateFrame("Frame", "GrimfallBagsSortDD", c, "UIDropDownMenuTemplate")
     dd:SetPoint("TOPLEFT", c, "TOPLEFT", 0, -30)
     UIDropDownMenu_SetWidth(dd, 160)
     B.SkinDropDown(dd, 160)
@@ -204,7 +188,7 @@ local function BuildProfilesTab(c)
     lbl:SetPoint("TOPLEFT", c, "TOPLEFT", 14, -14)
     lbl:SetText("Choose a profile (applies the display settings):")
 
-    local dd = CreateFrame("Frame", "AscensionBagsProfileDD", c, "UIDropDownMenuTemplate")
+    local dd = CreateFrame("Frame", "GrimfallBagsProfileDD", c, "UIDropDownMenuTemplate")
     dd:SetPoint("TOPLEFT", c, "TOPLEFT", 0, -30)
     UIDropDownMenu_SetWidth(dd, 150)
     B.SkinDropDown(dd, 150)
@@ -219,15 +203,12 @@ local function BuildProfilesTab(c)
                 UIDropDownMenu_SetSelectedValue(dd, btn.value)
                 UIDropDownMenu_SetText(dd, btn.value)
                 B.ApplyProfile(btn.value)
-                print("|cff33aaff[AscensionBags]|r Profile '"..btn.value.."' active (columns/size: /reload).")
+                print("|cff33aaff[GrimfallBags]|r Profile '"..btn.value.."' active (columns/size: /reload).")
             end
             UIDropDownMenu_AddButton(info, level)
         end
     end)
 
-    -- Reflect the currently-active profile (set on save/apply, persisted
-    -- in cfg.activeProfile) every time this tab is shown, instead of
-    -- always resetting to blank.
     c:SetScript("OnShow", function()
         local active = B.Config().activeProfile
         if active and B.Config().profiles[active] then
@@ -244,7 +225,7 @@ local function BuildProfilesTab(c)
     newBtn:SetWidth(90); newBtn:SetHeight(20)
     newBtn:SetPoint("LEFT", dd, "RIGHT", -8, 2)
     newBtn:SetText("Save as...")
-    newBtn:SetScript("OnClick", function() StaticPopup_Show("ASCBAGS_PROFILE_NEW") end)
+    newBtn:SetScript("OnClick", function() StaticPopup_Show("GFBAGS_PROFILE_NEW") end)
     B.SkinButton(newBtn)
 
     local delBtn = CreateFrame("Button", nil, c, "UIPanelButtonTemplate")
@@ -254,17 +235,13 @@ local function BuildProfilesTab(c)
     delBtn:SetScript("OnClick", function()
         if selectedProfile then
             B.DeleteProfile(selectedProfile)
-            print("|cff33aaff[AscensionBags]|r Profile '"..selectedProfile.."' deleted.")
+            print("|cff33aaff[GrimfallBags]|r Profile '"..selectedProfile.."' deleted.")
             selectedProfile = nil
             UIDropDownMenu_SetText(dd, "-")
         end
     end)
     B.SkinButton(delBtn)
 
-    -- Import/export: shared window (see B.ShowIOWindow in Core.lua). On
-    -- import, Name is only a MANUAL OVERRIDE - leave it blank and the
-    -- name embedded in the pasted JSON (see B.ExportProfile) is used
-    -- automatically.
     local function ShowIO(mode)
         if mode == "export" then
             B.ShowIOWindow({
@@ -289,12 +266,12 @@ local function BuildProfilesTab(c)
                         name = type(obj) == "table" and obj.name or nil
                     end
                     if not name or name == "" then
-                        return false, "|cff33aaff[AscensionBags]|r Couldn't find a name in that string - type one in the Name box."
+                        return false, "|cff33aaff[GrimfallBags]|r Couldn't find a name in that string - type one in the Name box."
                     end
                     if B.ImportProfile(name, str) then
-                        return true, "|cff33aaff[AscensionBags]|r Profile '"..name.."' imported."
+                        return true, "|cff33aaff[GrimfallBags]|r Profile '"..name.."' imported."
                     end
-                    return false, "|cff33aaff[AscensionBags]|r Import failed (check the string)."
+                    return false, "|cff33aaff[GrimfallBags]|r Import failed (check the string)."
                 end,
             })
         end
@@ -320,16 +297,13 @@ local function BuildProfilesTab(c)
     linkBtn:SetText("Chat Link")
     linkBtn:SetScript("OnClick", function()
         if not selectedProfile then
-            print("|cff33aaff[AscensionBags]|r Select a profile first.")
+            print("|cff33aaff[GrimfallBags]|r Select a profile first.")
             return
         end
         local link = B.ProfileShareText(selectedProfile)
         if not link then return end
-        -- Now that categories/pins ride along, a big ruleset can push
-        -- the marker text past what chat safely carries - warn instead
-        -- of letting it silently vanish (see the earlier |H link bug).
         if #link > 220 then
-            print("|cffff5555[AscensionBags]|r That profile+categories string is "
+            print("|cffff5555[GrimfallBags]|r That profile+categories string is "
                   ..#link.." characters - too long for chat to carry reliably. "
                   .."Use the Export box instead (Ctrl+C) and share it via Discord.")
             return
@@ -346,9 +320,6 @@ local function BuildProfilesTab(c)
     hint:SetText("A profile stores: view, bag-slot row, junk greying, iLvl, new duration, sort method, guild bank view - AND your full category setup (rules, tags, pinned item IDs, protected flags). Export/Chat Link include everything; applying a saved profile only changes the display settings above, categories stay as they are.")
 end
 
----------------------------------------------------------------------------
--- Window with tabs
----------------------------------------------------------------------------
 local function SelectTab(key)
     activeTab = key
     for k, t in pairs(tabs) do
@@ -370,26 +341,24 @@ end
 local SIDEBAR_W = 140
 
 local function Build()
-    local d = CreateFrame("Frame", "AscensionBagsOptions", UIParent)
+    local d = CreateFrame("Frame", "GrimfallBagsOptions", UIParent)
     d:SetWidth(660 + SIDEBAR_W + 12); d:SetHeight(570)
     d:SetPoint("CENTER")
     B.StyleWindow(d)
     B.MakeMovable(d, "Options")
     d:SetFrameStrata("DIALOG")
     d:Hide()
-    tinsert(UISpecialFrames, "AscensionBagsOptions")
+    tinsert(UISpecialFrames, "GrimfallBagsOptions")
     dialog = d
 
     local title = d:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     title:SetPoint("TOP", d, "TOP", 0, -10)
-    title:SetText("|cff33aaffAscensionBags|r customize")
+    title:SetText("|cff33aaffGrimfallBags|r customize")
 
     local xb = CreateFrame("Button", nil, d, "UIPanelCloseButton")
     xb:SetPoint("TOPRIGHT", d, "TOPRIGHT", 2, 2)
     B.SkinClose(xb)
 
-    -- Vertical category list (ElvUI-style), instead of a row of tab
-    -- buttons: easier to see which section you're in at a glance.
     local sidebar = CreateFrame("Frame", nil, d)
     sidebar:SetPoint("TOPLEFT", d, "TOPLEFT", 12, -34)
     sidebar:SetPoint("BOTTOMLEFT", d, "BOTTOMLEFT", 12, 10)

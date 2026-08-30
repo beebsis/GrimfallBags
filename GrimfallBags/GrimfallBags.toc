@@ -1,10 +1,10 @@
 ## Interface: 30300
-## Title: Ascension Bags
-## Notes: Bags/Bank/Guild Bank in category or single-list view | WoW 3.3.5a / Ascension
+## Title: Grimfall Bags
+## Notes: Bags/Bank/Guild Bank in category or single-list view | WoW 3.3.5a / Grimfall
 ## Author: Beebsis
-## Version: 1.1.1
+## Version: 1.2.0
 ## RequiredDeps: Syndicator335
-## SavedVariables: AscensionBagsConfig
+## SavedVariables: GrimfallBagsConfig
 
 Core.lua
 WindowChrome.lua
@@ -14,6 +14,7 @@ Profiles.lua
 Json.lua
 Categories.lua
 Views.lua
+CurrencyPanel.lua
 GuildBank.lua
 Sorting.lua
 Transfers.lua

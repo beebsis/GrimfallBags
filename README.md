@@ -1,6 +1,6 @@
-# AscensionBags
+# GrimfallBags
 
-A bag, bank, and guild bank replacement for **World of Warcraft 3.3.5a** on **[Ascension](https://ascension.gg/)**, based on the retail addon [Baganator](https://www.curseforge.com/wow/addons/baganator) - there was never a 3.3.5a version, only retail, so this brings it to 3.3.5a and continues it with new features and fixes.
+A bag, bank, and guild bank replacement for **World of Warcraft 3.3.5a** on **Grimfall**, based on the retail addon [Baganator](https://www.curseforge.com/wow/addons/baganator) - there was never a 3.3.5a version, only retail, so this brings it to 3.3.5a and continues it with new features and fixes.
 
 ## Features
 
@@ -12,21 +12,22 @@ A bag, bank, and guild bank replacement for **World of Warcraft 3.3.5a** on **[A
 - **Context-aware transfer button** - sell junk/matching items at a merchant, deposit or withdraw matching items at the bank
 - **Guild bank replacement**, with offline/remote viewing of tabs you've already scanned
 - **View other characters' bags/bank offline**, via Syndicator335's tracked data
-- **Tracked currency** shown inline with your gold
-- **Bulk transmog-appearance collection** - one click collects appearances from every sub-legendary item in your bags
+- **Tracked currency** shown inline with your gold, plus an optional docked panel (toggle from the toolbar) listing every currency you've flagged "Show on Backpack" with name, icon, and count
 - **Automation** - auto-open bags at merchants/mailboxes, auto-repair (prefers guild funds)
 - **Profiles** - save, apply, export/import, or share (via chat link) your display settings and full category setup
 - **ElvUI integration** - detects ElvUI on login and asks which addon should own your bags/bank/guild bank, plus an optional skin that matches ElvUI's look
-- Item level display, "New" item highlighting, and a transmog-not-collected indicator (purple dot) on item icons
+- Item level display and "New" item highlighting on item icons
+
+Bulk transmog-appearance collection is present in the code but currently disabled (commented out, not deleted) - Grimfall doesn't have a transmog system yet. See [Notes for contributors](#notes-for-contributors).
 
 ## Requirements
 
 - WoW client: 3.3.5a (`Interface: 30300`)
-- **Syndicator335** (bundled in this repo) - the underlying data-tracking/search layer; AscensionBags is a pure UI layer on top of it
+- **Syndicator335** (bundled in this repo) - the underlying data-tracking/search layer; GrimfallBags is a pure UI layer on top of it
 
 ## Installation
 
-1. Copy both the `AscensionBags` and `Syndicator335` folders into your `Interface/AddOns/` directory.
+1. Copy both the `GrimfallBags` and `Syndicator335` folders into your `Interface/AddOns/` directory.
 2. Fully restart the WoW client (see [Notes for contributors](#notes-for-contributors) - `/reload` alone is not always enough right after adding new files).
 3. Enable both addons on the character-select AddOns screen.
 
@@ -34,14 +35,14 @@ A bag, bank, and guild bank replacement for **World of Warcraft 3.3.5a** on **[A
 
 | Command | Effect |
 |---|---|
-| `/ascbags`, `/abags`, `/AscensionBags` | Toggle the bag window |
-| `/ascbags options` | Open the customize window |
-| `/ascbags log` | Print the internal error log |
-| `/ascbags clearlog` | Clear the internal error log |
+| `/gfbags`, `/gbags`, `/GrimfallBags` | Toggle the bag window |
+| `/gfbags options` | Open the customize window |
+| `/gfbags log` | Print the internal error log |
+| `/gfbags clearlog` | Clear the internal error log |
 
 ## Configuration
 
-Open the customize window from the gear icon in the bag window's title bar, or via `/ascbags options`:
+Open the customize window from the gear icon in the bag window's title bar, or via `/gfbags options`:
 
 - **General** - view mode, item level display, tooltip options, Blizzard-frame replacement toggles (bags/bank/guild bank), automation (auto-open/auto-repair), ElvUI skin toggle
 - **Sorting** - sort method: type, quality, or item level
@@ -77,7 +78,7 @@ Priority (top of the list wins) determines match order and is independent of sec
 
 ## Project structure
 
-- `AscensionBags/` - the addon: UI, categories, sorting, transfers, guild bank, ElvUI skin
+- `GrimfallBags/` - the addon: UI, categories, sorting, transfers, guild bank, ElvUI skin
   - `Core.lua` - bootstrap: shared table, logging, config/defaults, slash command
   - `WindowChrome.lua` - window styling, move/resize/position persistence, icon buttons
   - `ElvUISkin.lua` - optional ElvUI look-and-feel integration
@@ -86,6 +87,7 @@ Priority (top of the list wins) determines match order and is independent of sec
   - `Json.lua` - minimal JSON encode/decode (profile/category export format)
   - `Categories.lua` - category rules, the category editor, tag/section logic
   - `Views.lua` - bag/bank windows: layout, search, toolbar, currency, transmog
+  - `CurrencyPanel.lua` - docked panel listing tracked ("Show on Backpack") currencies
   - `GuildBank.lua` - guild bank window
   - `Sorting.lua` - async in-place bag sort
   - `Transfers.lua` - merchant/bank transfer + category sell
@@ -103,13 +105,18 @@ a release/upload:
 python tools/build_release.py
 ```
 
-This writes a full copy of `AscensionBags/` and `Syndicator335/` into `dist/`, with Lua
+This writes a full copy of `GrimfallBags/` and `Syndicator335/` into `dist/`, with Lua
 comments removed (both whole-line and inline trailing comments) and everything else
 (`.toc`, `Assets/`) copied unchanged. Your working source is never modified. `dist/` is
 git-ignored - regenerate it whenever you cut a release.
 
+Note: the stripper bails out and copies a file as-is (with a warning) if it contains a
+`[[` long-bracket string or block comment, rather than risk mishandling one. `Views.lua`
+currently has a `--[[ ]]` block comment (the disabled transmog button) and will ship
+un-stripped in `dist/` as a result - still valid, just not comment-free like the rest.
+
 ## Notes for contributors
 
-- **This Ascension client build does not reliably pick up a brand-new `.lua` file added to an already-loaded addon via `/reload`.** If you add a file and list it in the `.toc`, do a full client restart (exit to desktop and relaunch, or at minimum log out to the character-select screen) - otherwise you'll see "attempt to call a nil value" errors for anything defined only in the new file. Edits to *existing* files reload fine.
+- **This Grimfall client build does not reliably pick up a brand-new `.lua` file added to an already-loaded addon via `/reload`.** If you add a file and list it in the `.toc`, do a full client restart (exit to desktop and relaunch, or at minimum log out to the character-select screen) - otherwise you'll see "attempt to call a nil value" errors for anything defined only in the new file. Edits to *existing* files reload fine.
 - **Texture paths are literal filesystem paths**, not resolved through the addon manager - `Interface\AddOns\<folder>\...` has to match the real on-disk layout under the client root exactly. This tripped us up because `RequiredDeps: Syndicator335` in the `.toc` resolves fine as a bare name (that goes through addon-metadata resolution), but a texture at the same nominal depth does not.
 - `Assets/Currency.tga`, `Guild.tga`, `GuildTabLogs.tga`, `GuildTabText.tga`, `Chest.tga`, `Everything.tga`, `logo.tga`, `bag_keys.tga`, `bag_soul_shard.tga`, `classic-bag-slot.tga`, `equipment-set-shield.tga`, and `arrow.tga` are provided but currently unused - reserved for features not yet wired up (e.g. a keyring/soul-shard bag icon, a protected-item shield indicator, section-header collapse arrows).

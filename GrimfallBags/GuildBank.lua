@@ -1,43 +1,33 @@
----------------------------------------------------------------------------
--- AscensionBags - Guild Bank
--- Custom guild bank window: tab bar, 98-slot grid per tab, gold
--- deposit/withdraw, search. Fully interactive at the guild bank (items
--- in/out via the Blizzard API), read-only from the Syndicator335 cache
--- ("remote view") when away from it.
----------------------------------------------------------------------------
-local B = AscensionBags
+local B = GrimfallBags
 local S = Syndicator335
 local Log, Guard = B.Log, B.Guard
 
 local GB_COLS   = 14
 local GB_SLOTS  = 98
-local BTN       = 37    -- matches the standard in-game bag icon size, fixed
+local BTN       = 37
 local BTN_PAD   = 2
 local PAD       = 10
 
-local frame          -- Fenster
-local buttons = {}   -- Live-Buttons (interaktiv)
+local frame
+local buttons = {}
 local currentTab = 1
 local atGuildBank = false
 local gbResizeDirty = false
 
----------------------------------------------------------------------------
--- Window construction
----------------------------------------------------------------------------
 local function Build()
-    local w = CreateFrame("Frame", "AscensionBagsGuildBank", UIParent)
+    local w = CreateFrame("Frame", "GrimfallBagsGuildBank", UIParent)
     local width = PAD * 2 + GB_COLS * (BTN + BTN_PAD)
     w:SetWidth(width)
     w:SetHeight(120 + math.ceil(GB_SLOTS / GB_COLS) * (BTN + BTN_PAD))
-    B.MakeMovable(w, "AscensionBagsGuildBank")
-    B.MakeResizable(w, "AscensionBagsGuildBank", PAD * 2 + 4 * (BTN + BTN_PAD), function()
+    B.MakeMovable(w, "GrimfallBagsGuildBank")
+    B.MakeResizable(w, "GrimfallBagsGuildBank", PAD * 2 + 4 * (BTN + BTN_PAD), function()
         gbResizeDirty = true
     end)
-    B.RestoreWidth(w, "AscensionBagsGuildBank", width)
+    B.RestoreWidth(w, "GrimfallBagsGuildBank", width)
     w:SetFrameStrata("HIGH")
     B.StyleWindow(w)
     w:Hide()
-    tinsert(UISpecialFrames, "AscensionBagsGuildBank")
+    tinsert(UISpecialFrames, "GrimfallBagsGuildBank")
     frame = w
 
     w.title = w:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -48,7 +38,6 @@ local function Build()
     xb:SetPoint("TOPRIGHT", w, "TOPRIGHT", 2, 2)
     B.SkinClose(xb)
 
-    -- Titel-Icons: Sortieren (nur live) + Ansicht umschalten
     local viewBtn = B.TitleIconButton(w, B.ASSETS.."GuildTabText",
         "Switch view (category/grid)", function()
             local cfg = B.Config()
@@ -64,7 +53,6 @@ local function Build()
     sortBtn:SetPoint("RIGHT", viewBtn, "LEFT", -3, 0)
     w.sortBtn = sortBtn
 
-    -- Header pool for the category view
     w.headers = {}
     w.nHdr = 0
     function w.AcquireHeader()
@@ -79,10 +67,9 @@ local function Build()
         return h
     end
 
-    -- Tab bar (up to 6 tabs in 3.3.5a)
     w.tabBtns = {}
     for t = 1, 6 do
-        local tb = CreateFrame("Button", "AscensionBagsGBTab"..t, w)
+        local tb = CreateFrame("Button", "GrimfallBagsGBTab"..t, w)
         tb:SetWidth(32); tb:SetHeight(32)
         if t == 1 then tb:SetPoint("TOPLEFT", w, "TOPLEFT", PAD, -(PAD + 18))
         else tb:SetPoint("LEFT", w.tabBtns[t-1], "RIGHT", 4, 0) end
@@ -115,10 +102,9 @@ local function Build()
         w.tabBtns[t] = tb
     end
 
-    -- Item grid: buttons with guild bank interaction
     local gridTop = -(PAD + 18 + 36 + 4)
     for i = 1, GB_SLOTS do
-        local btn = CreateFrame("Button", "AscensionBagsGBItem"..i, w, "ItemButtonTemplate")
+        local btn = CreateFrame("Button", "GrimfallBagsGBItem"..i, w, "ItemButtonTemplate")
         btn:SetWidth(BTN); btn:SetHeight(BTN)
         local col = (i - 1) % GB_COLS
         local row = math.floor((i - 1) / GB_COLS)
@@ -128,11 +114,11 @@ local function Build()
         btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         btn:RegisterForDrag("LeftButton")
         btn:SetScript("OnClick", function(self, mouse)
-            if not atGuildBank then return end   -- Remote: nur ansehen
+            if not atGuildBank then return end
             if mouse == "RightButton" then
-                AutoStoreGuildBankItem(currentTab, self.slot)   -- into bags
+                AutoStoreGuildBankItem(currentTab, self.slot)
             else
-                PickupGuildBankItem(currentTab, self.slot)      -- pick up/place
+                PickupGuildBankItem(currentTab, self.slot)
             end
         end)
         btn:SetScript("OnDragStart", function(self)
@@ -154,7 +140,6 @@ local function Build()
         buttons[i] = btn
     end
 
-    -- Money row + deposit/withdraw
     w.moneyText = w:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     w.moneyText:SetPoint("BOTTOMRIGHT", w, "BOTTOMRIGHT", -(PAD + 4), PAD)
 
@@ -163,7 +148,7 @@ local function Build()
     w.depositBtn:SetPoint("BOTTOMLEFT", w, "BOTTOMLEFT", PAD, PAD - 2)
     w.depositBtn:SetText(GUILDBANK_DEPOSIT_BUTTON or "Deposit")
     w.depositBtn:SetScript("OnClick", function()
-        StaticPopup_Show("ASCBAGS_GB_DEPOSIT")
+        StaticPopup_Show("GFBAGS_GB_DEPOSIT")
     end)
     B.SkinButton(w.depositBtn)
 
@@ -172,13 +157,12 @@ local function Build()
     w.withdrawBtn:SetPoint("LEFT", w.depositBtn, "RIGHT", 6, 0)
     w.withdrawBtn:SetText(GUILDBANK_WITHDRAW_BUTTON or "Withdraw")
     w.withdrawBtn:SetScript("OnClick", function()
-        StaticPopup_Show("ASCBAGS_GB_WITHDRAW")
+        StaticPopup_Show("GFBAGS_GB_WITHDRAW")
     end)
     B.SkinButton(w.withdrawBtn)
 end
 
--- Gold dialogs (amount in gold)
-StaticPopupDialogs["ASCBAGS_GB_DEPOSIT"] = {
+StaticPopupDialogs["GFBAGS_GB_DEPOSIT"] = {
     text = (GUILDBANK_DEPOSIT_BUTTON or "Deposit").." (Gold):",
     button1 = ACCEPT or "Accept", button2 = CANCEL or "Cancel",
     hasEditBox = 1, maxLetters = 8,
@@ -189,7 +173,7 @@ StaticPopupDialogs["ASCBAGS_GB_DEPOSIT"] = {
     EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
     timeout = 0, whileDead = 1, hideOnEscape = 1,
 }
-StaticPopupDialogs["ASCBAGS_GB_WITHDRAW"] = {
+StaticPopupDialogs["GFBAGS_GB_WITHDRAW"] = {
     text = (GUILDBANK_WITHDRAW_BUTTON or "Withdraw").." (Gold):",
     button1 = ACCEPT or "Accept", button2 = CANCEL or "Cancel",
     hasEditBox = 1, maxLetters = 8,
@@ -201,21 +185,13 @@ StaticPopupDialogs["ASCBAGS_GB_WITHDRAW"] = {
     timeout = 0, whileDead = 1, hideOnEscape = 1,
 }
 
----------------------------------------------------------------------------
--- Rendering (live at the guild bank or remote from the cache)
----------------------------------------------------------------------------
 function B.RefreshGuildBank()
     if not (frame and frame:IsShown()) then return end
     Guard("RefreshGuildBank", function()
-        -- GB_COLS (used only by the flat GRID mode below) is derived
-        -- from the frame's live width, uncapped. The category-view
-        -- packing further down computes its own per-block cap the same
-        -- way, see maxBlockCols below.
         GB_COLS = math.max(1, math.floor((frame:GetWidth() - PAD * 2 + BTN_PAD) / (BTN + BTN_PAD)))
 
         local guild = S.Guild()
 
-        -- Tab bar
         local numTabs = atGuildBank and (GetNumGuildBankTabs() or 0) or 0
         if not atGuildBank and guild then
             for t in pairs(guild.tabs or {}) do
@@ -239,12 +215,10 @@ function B.RefreshGuildBank()
             end
         end
 
-        -- Title: live or remote indicator
         local gname = GetGuildInfo("player") or (GUILD or "Guild")
         frame.title:SetText(atGuildBank and (gname.." - "..(GUILD_BANK or "Guild Bank"))
             or ("|cffaaaaff"..gname.." - "..(GUILD_BANK or "Guild Bank").."  (Cache)|r"))
 
-        -- Collect slot data (live or cache)
         local cachedTab = guild and guild.tabs and guild.tabs[currentTab]
         local entries = {}
         for i = 1, GB_SLOTS do
@@ -260,7 +234,6 @@ function B.RefreshGuildBank()
             entries[i] = {l=link, t=tex, c=cnt}
         end
 
-        -- Fill button (position is handled by the layout below)
         local function Fill(btn, e)
             btn.link = e.l
             SetItemButtonTexture(btn, e.t)
@@ -283,7 +256,6 @@ function B.RefreshGuildBank()
             end
         end
 
-        -- Reset headers
         for i = 1, frame.nHdr do frame.headers[i]:Hide() end
         frame.nHdr = 0
 
@@ -291,7 +263,6 @@ function B.RefreshGuildBank()
 
         local gridTop = -(PAD + 18 + 36 + 4)
         if not B.Config().gbCategoryView then
-            -- GRID: classic 98-slot layout
             for i, btn in ipairs(buttons) do
                 local col = (i - 1) % GB_COLS
                 local row = math.floor((i - 1) / GB_COLS)
@@ -303,8 +274,6 @@ function B.RefreshGuildBank()
             end
             frame:SetHeight(120 + math.ceil(GB_SLOTS / GB_COLS) * (BTN + BTN_PAD))
         else
-            -- CATEGORIES: grouped like the bag window; empty slots as
-            -- an "Empty" group at the end (they remain drop targets)
             local groups, order = {}, {}
             for i = 1, GB_SLOTS do
                 local e = entries[i]
@@ -319,10 +288,9 @@ function B.RefreshGuildBank()
             end
             table.sort(order, function(a, b)
                 local ea, eb = (a == (EMPTY or "Empty")), (b == (EMPTY or "Empty"))
-                if ea ~= eb then return eb end   -- Empty goes last
+                if ea ~= eb then return eb end
                 return a < b
             end)
-            -- Sort items visually within the groups
             for _, slotList in pairs(groups) do
                 table.sort(slotList, function(a, b)
                     local la, lb = entries[a].l, entries[b].l
@@ -334,12 +302,6 @@ function B.RefreshGuildBank()
                 end)
             end
 
-            -- Flow layout: same left-to-right packing as the bag
-            -- window - each category is its own block (header + grid),
-            -- only wrapped internally to a second row if it has more
-            -- items than fit across the whole window in one go. Blocks
-            -- pack side by side using the window's actual width and
-            -- only drop to a new row when the next block no longer fits.
             local HEADER_H   = 16
             local BLOCK_GAP  = 14
             local availWidth = frame:GetWidth() - PAD * 2
@@ -383,7 +345,6 @@ function B.RefreshGuildBank()
             frame:SetHeight(-y + 40)
         end
 
-        -- Geld + Buttons
         local money = atGuildBank and GetGuildBankMoney() or (guild and guild.money)
         frame.moneyText:SetText(B.MoneyString(money))
         if atGuildBank then
@@ -406,13 +367,6 @@ function B.ToggleGuildBank()
     end
 end
 
----------------------------------------------------------------------------
--- Events: auto-open at the guild bank, suppress the Blizzard window
----------------------------------------------------------------------------
----------------------------------------------------------------------------
--- Guild bank sorter: current tab, same logic as the bags (merge
--- stacks, then swap items into the target order).
----------------------------------------------------------------------------
 local gbSorter = CreateFrame("Frame")
 gbSorter:Hide()
 
@@ -422,7 +376,7 @@ local function GBSortStep()
     local slots = {}
     for i = 1, GB_SLOTS do
         local _, cnt, locked = GetGuildBankItemInfo(tab, i)
-        if locked then return true end   -- wait
+        if locked then return true end
         local link = GetGuildBankItemLink(tab, i)
         slots[#slots+1] = {
             slot = i, link = link, id = S.ItemID(link), count = cnt or 0,
@@ -430,7 +384,6 @@ local function GBSortStep()
         }
     end
 
-    -- merge partial stacks
     local partial = {}
     for _, s in ipairs(slots) do
         if s.id and s.count < s.max then
@@ -444,7 +397,6 @@ local function GBSortStep()
         end
     end
 
-    -- swap items into the target order
     local items = {}
     for _, s in ipairs(slots) do
         if s.link then items[#items+1] = s end
@@ -491,8 +443,6 @@ function B.StartGuildBankSort()
     Log("GB sort started (tab "..currentTab..")")
 end
 
--- Live column reflow while dragging the resize grip, throttled so a
--- full re-layout doesn't run every single frame during a drag.
 local resizeTicker = CreateFrame("Frame")
 resizeTicker:SetScript("OnUpdate", function(self, elapsed)
     if not gbResizeDirty then return end
@@ -503,8 +453,6 @@ resizeTicker:SetScript("OnUpdate", function(self, elapsed)
     B.RefreshGuildBank()
 end)
 
--- Stagger tab queries: one every half second. Querying every tab at
--- once can confuse custom servers (Ascension).
 local queryQueue = {}
 local queryTimer = CreateFrame("Frame")
 queryTimer:Hide()
@@ -525,7 +473,7 @@ local function QueueTabQueries()
     for tab = 1, GetNumGuildBankTabs() or 0 do
         queryQueue[#queryQueue+1] = tab
     end
-    queryTimer.t = 0.5   -- erster Query sofort
+    queryTimer.t = 0.5
     queryTimer:Show()
 end
 
@@ -540,7 +488,7 @@ evt:SetScript("OnEvent", function(self, event, arg1)
     if event == "GUILDBANKFRAME_OPENED" then
         atGuildBank = true
         if not frame then Build() end
-        B.RestorePosition(frame, "AscensionBagsGuildBank",
+        B.RestorePosition(frame, "GrimfallBagsGuildBank",
             {"TOPLEFT", UIParent, "TOPLEFT", 40, -80})
         frame:Show()
         currentTab = GetCurrentGuildBankTab() or 1
@@ -557,8 +505,6 @@ evt:SetScript("OnEvent", function(self, event, arg1)
         B.RefreshGuildBank()
 
     elseif event == "ADDON_LOADED" and arg1 == "Blizzard_GuildBankUI" then
-        -- Do NOT Hide() Blizzard's guild bank (that could end the
-        -- server-side session), instead make it invisible/unclickable.
         if B.Config().replaceGuildBank and GuildBankFrame then
             GuildBankFrame:HookScript("OnShow", function(f)
                 f:SetAlpha(0)

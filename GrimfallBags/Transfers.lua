@@ -1,28 +1,10 @@
----------------------------------------------------------------------------
--- AscensionBags - Transfers
--- Context-aware transfer button (in the window title bar):
---   at a merchant:  sells every item matching the current search
---                   (empty search = grey junk only), with a profit report
---   at the bank:    deposits every matching bag item into the bank
---                   (bank window: withdraws matching items from the bank)
--- Asynchronous, one move per tick, waits for locks.
---
--- Right-clicking a category header sells everything in that category
--- (with a confirmation popup); shift-right-click skips the popup and
--- sells instantly. See SellCategory()/SellCategoryConfirmed() below.
----------------------------------------------------------------------------
-local B = AscensionBags
+local B = GrimfallBags
 local S = Syndicator335
 local Log = B.Log
 
 local atMerchant = false
 local atBank     = false
 
----------------------------------------------------------------------------
--- Auto-repair: prefers guild bank funds when the player is authorized
--- (CanGuildBankRepair may not exist on this core - guarded), falls back
--- to personal gold, skips silently if nothing is damaged.
----------------------------------------------------------------------------
 local function DoAutoRepair()
     if not CanMerchantRepair or not CanMerchantRepair() then return end
     local cost = GetRepairAllCost and GetRepairAllCost() or 0
@@ -30,18 +12,15 @@ local function DoAutoRepair()
 
     if type(CanGuildBankRepair) == "function" and CanGuildBankRepair() then
         RepairAllItems(true)
-        print("|cff33aaff[AscensionBags]|r Auto-repaired for "..B.MoneyString(cost).." (guild funds).")
+        print("|cff33aaff[GrimfallBags]|r Auto-repaired for "..B.MoneyString(cost).." (guild funds).")
     elseif GetMoney() >= cost then
         RepairAllItems(false)
-        print("|cff33aaff[AscensionBags]|r Auto-repaired for "..B.MoneyString(cost)..".")
+        print("|cff33aaff[GrimfallBags]|r Auto-repaired for "..B.MoneyString(cost)..".")
     else
-        print("|cff33aaff[AscensionBags]|r Auto-repair skipped - need "..B.MoneyString(cost)..".")
+        print("|cff33aaff[GrimfallBags]|r Auto-repair skipped - need "..B.MoneyString(cost)..".")
     end
 end
 
----------------------------------------------------------------------------
--- Collect matching items from a set of bags
----------------------------------------------------------------------------
 local function MatchingItems(bags, query, junkOnly)
     local list = {}
     for _, bag in ipairs(bags) do
@@ -76,9 +55,6 @@ local function FirstEmptySlot(bags)
     end
 end
 
----------------------------------------------------------------------------
--- Asynchronous transfer runner
----------------------------------------------------------------------------
 local runner = CreateFrame("Frame")
 runner:Hide()
 
@@ -92,16 +68,15 @@ runner:SetScript("OnUpdate", function(self, elapsed)
     if not job then self:Hide() return end
 
     if job.mode == "vendorList" then
-        -- Explicit list of {bag,slot,link} entries (category sell)
         local list = job.items
         while #list > 0 do
             local it = list[1]
             local curLink = GetContainerItemLink(it.bag, it.slot)
             if curLink ~= it.link then
-                table.remove(list, 1)   -- item moved/gone, skip it safely
+                table.remove(list, 1)
             else
                 local _, _, locked = GetContainerItemInfo(it.bag, it.slot)
-                if locked then return end   -- wait for this tick
+                if locked then return end
                 UseContainerItem(it.bag, it.slot)
                 table.remove(list, 1)
                 return
@@ -110,7 +85,7 @@ runner:SetScript("OnUpdate", function(self, elapsed)
         self:Hide()
         local profit = GetMoney() - (job.startMoney or GetMoney())
         if profit > 0 then
-            print("|cff33aaff[AscensionBags]|r Sold from '"..(job.catName or "?").."': +"..B.MoneyString(profit))
+            print("|cff33aaff[GrimfallBags]|r Sold from '"..(job.catName or "?").."': +"..B.MoneyString(profit))
         end
         Log("Category sell finished")
         return
@@ -118,7 +93,6 @@ runner:SetScript("OnUpdate", function(self, elapsed)
 
     local items = MatchingItems(job.srcBags, job.query, job.junkOnly)
     if job.mode == "vendor" and B.IsItemSellProtected then
-        -- Protection only blocks SELLING - moving to/from the bank is fine.
         for i = #items, 1, -1 do
             if B.IsItemSellProtected(items[i].link) then table.remove(items, i) end
         end
@@ -128,7 +102,7 @@ runner:SetScript("OnUpdate", function(self, elapsed)
         if job.mode == "vendor" then
             local profit = GetMoney() - (job.startMoney or GetMoney())
             if profit > 0 then
-                print("|cff33aaff[AscensionBags]|r Sold: +"..B.MoneyString(profit))
+                print("|cff33aaff[GrimfallBags]|r Sold: +"..B.MoneyString(profit))
             end
         end
         Log("Transfer finished")
@@ -137,11 +111,11 @@ runner:SetScript("OnUpdate", function(self, elapsed)
 
     local it = items[1]
     if job.mode == "vendor" then
-        UseContainerItem(it.bag, it.slot)   -- at a merchant = sell
+        UseContainerItem(it.bag, it.slot)
     else
         local tBag, tSlot = FirstEmptySlot(job.dstBags)
         if not tBag then
-            print("|cff33aaff[AscensionBags]|r No room at the destination.")
+            print("|cff33aaff[GrimfallBags]|r No room at the destination.")
             self:Hide()
             return
         end
@@ -158,15 +132,11 @@ local function StartJob(job)
     Log("Transfer started ("..job.mode..")")
 end
 
----------------------------------------------------------------------------
--- Public: called from the transfer button in the title bar
----------------------------------------------------------------------------
 function B.DoTransfer(view)
     local query = (view.searchStr or ""):lower()
     local isBankView = (view == B.bankView)
 
     if atMerchant and not isBankView then
-        -- Sell: empty search -> junk only; otherwise everything matching
         StartJob({
             mode = "vendor", srcBags = B.PLAYER_BAGS,
             query = query, junkOnly = (query == ""),
@@ -174,23 +144,17 @@ function B.DoTransfer(view)
         })
     elseif atBank then
         if isBankView then
-            -- from the bank into the bags
             StartJob({mode="move", srcBags=B.BANK_BAGS, dstBags=B.PLAYER_BAGS, query=query})
         else
-            -- from the bags into the bank
             StartJob({mode="move", srcBags=B.PLAYER_BAGS, dstBags=B.BANK_BAGS, query=query})
         end
     end
 end
 
----------------------------------------------------------------------------
--- Sell everything in one category, shown via right-click on a category
--- header in the bag view. Confirmed = skip the popup (shift-right-click).
----------------------------------------------------------------------------
 function B.SellCategory(items, catName)
     if not atMerchant or not items or #items == 0 then return end
     if B.IsCategoryProtected and B.IsCategoryProtected(catName) then return end
-    StaticPopup_Show("ASCBAGS_SELL_CATEGORY", #items, catName,
+    StaticPopup_Show("GFBAGS_SELL_CATEGORY", #items, catName,
         {items = items, catName = catName})
 end
 
@@ -209,7 +173,7 @@ function B.SellCategoryConfirmed(items, catName)
     Log("Category sell started ('"..(catName or "?").."', "..#list.." items)")
 end
 
-StaticPopupDialogs["ASCBAGS_SELL_CATEGORY"] = {
+StaticPopupDialogs["GFBAGS_SELL_CATEGORY"] = {
     text = "Sell all %d items in \"%s\" to the vendor?",
     button1 = SELL or "Sell",
     button2 = CANCEL or "Cancel",
@@ -219,9 +183,6 @@ StaticPopupDialogs["ASCBAGS_SELL_CATEGORY"] = {
     timeout = 0, whileDead = 1, hideOnEscape = 1,
 }
 
----------------------------------------------------------------------------
--- Visibility of the transfer buttons per context
----------------------------------------------------------------------------
 function B.IsAtMerchant() return atMerchant end
 
 function B.UpdateTransferButtons()
@@ -233,6 +194,7 @@ function B.UpdateTransferButtons()
             else
                 view.transferBtn:Hide()
             end
+            if view.RelayoutBagsBtn then view.RelayoutBagsBtn() end
         end
     end
     set(B.bagView, atMerchant or atBank,
@@ -264,7 +226,6 @@ evt:SetScript("OnEvent", function(self, event)
     elseif event == "MAIL_SHOW" then
         if B.Config().autoOpenMailbox then B.OpenBags() end
     elseif event == "MAIL_CLOSED" then
-        -- no state to clear; present for symmetry/future use
     end
     B.UpdateTransferButtons()
 end)

@@ -1,24 +1,15 @@
----------------------------------------------------------------------------
--- AscensionBags - Shared Import/Export window (WeakAuras-style): one
--- bigger, resizable box instead of the two small near-identical ones
--- Profiles and Categories used to each have. Full corner-resize (unlike
--- the bag windows, both dimensions matter here - there's no auto-
--- computed content height), the text box reflows to the window's width,
--- a character counter (useful since Chat Link has a hard length limit),
--- and export auto-selects the text so Ctrl+C works immediately.
----------------------------------------------------------------------------
-local B = AscensionBags
+local B = GrimfallBags
 local ioWindow
 
 local function BuildIOWindow()
-    local w = CreateFrame("Frame", "AscensionBagsIOWindow", UIParent)
+    local w = CreateFrame("Frame", "GrimfallBagsIOWindow", UIParent)
     w:SetWidth(560); w:SetHeight(380)
     w:SetPoint("CENTER")
     B.StyleWindow(w)
     w:SetFrameStrata("FULLSCREEN_DIALOG")
     w:SetToplevel(true)
-    tinsert(UISpecialFrames, "AscensionBagsIOWindow")
-    B.MakeMovable(w, "AscensionBagsIOWindow")
+    tinsert(UISpecialFrames, "GrimfallBagsIOWindow")
+    B.MakeMovable(w, "GrimfallBagsIOWindow")
 
     w:SetResizable(true)
     w:SetMinResize(380, 220)
@@ -32,7 +23,7 @@ local function BuildIOWindow()
     grip:SetScript("OnMouseUp", function()
         w:StopMovingOrSizing()
         local cfg = B.Config()
-        cfg.winWidth["AscensionBagsIOWindow"] = w:GetWidth()
+        cfg.winWidth["GrimfallBagsIOWindow"] = w:GetWidth()
         cfg.ioWindowHeight = w:GetHeight()
     end)
 
@@ -50,7 +41,7 @@ local function BuildIOWindow()
     w.nameLabel = w:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     w.nameLabel:SetPoint("TOPLEFT", w, "TOPLEFT", 16, -30)
     w.nameLabel:SetTextColor(0.7, 0.7, 0.7)
-    w.nameBox = CreateFrame("EditBox", "AscensionBagsIOWindowName", w, "InputBoxTemplate")
+    w.nameBox = CreateFrame("EditBox", "GrimfallBagsIOWindowName", w, "InputBoxTemplate")
     w.nameBox:SetWidth(160); w.nameBox:SetHeight(20)
     w.nameBox:SetPoint("TOPLEFT", w, "TOPLEFT", 16, -44)
     w.nameBox:SetAutoFocus(false); w.nameBox:SetMaxLetters(24)
@@ -60,13 +51,9 @@ local function BuildIOWindow()
     w.strLabel = w:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     w.strLabel:SetTextColor(0.7, 0.7, 0.7)
 
-    local sf = CreateFrame("ScrollFrame", "AscensionBagsIOWindowScroll", w, "UIPanelScrollFrameTemplate")
+    local sf = CreateFrame("ScrollFrame", "GrimfallBagsIOWindowScroll", w, "UIPanelScrollFrameTemplate")
     sf:SetBackdrop(B.PANEL_BD)
     sf:SetBackdropColor(0, 0, 0, 0.4)
-    -- Without this, empty space below the actual text (whenever the
-    -- pasted/exported string is short) has no mouse-enabled frame over
-    -- it, so clicks fall through to the window underneath and start a
-    -- drag-to-move instead of a text click - claim the whole box.
     sf:EnableMouse(true)
     w.scroll = sf
     B.SkinScrollBar(_G[sf:GetName().."ScrollBar"])
@@ -90,16 +77,7 @@ local function BuildIOWindow()
     B.SkinButton(w.okBtn)
 
     local function Reflow()
-        -- Compute from w:GetWidth() directly, not sf:GetWidth() - sf's
-        -- width is anchor-derived (TOPLEFT 14 / BOTTOMRIGHT -32 from w),
-        -- and reading it back immediately after w was just resized in
-        -- the same call risks a stale value. w:GetWidth() is a value we
-        -- just set explicitly, so it's guaranteed current.
         local target = math.max(100, w:GetWidth() - 14 - 32 - 56)
-        -- Hide/show forces the EditBox to drop any cached line-wrap /
-        -- highlight-extent metrics from its previous width instead of
-        -- silently keeping them, which plain SetWidth doesn't reliably
-        -- do for this widget.
         eb:Hide()
         eb:SetWidth(target)
         eb:Show()
@@ -110,16 +88,11 @@ local function BuildIOWindow()
     return w
 end
 
--- cfg = {
---   title, mode = "export"|"import", text (initial string),
---   showName (bool), nameLabel, nameText, strLabel,
---   okText, onImport = function(str, name) -> ok(bool), msg(string|nil)
--- }
 function B.ShowIOWindow(cfg)
     if not ioWindow then ioWindow = BuildIOWindow() end
     local w = ioWindow
 
-    w:SetWidth(B.Config().winWidth["AscensionBagsIOWindow"] or 560)
+    w:SetWidth(B.Config().winWidth["GrimfallBagsIOWindow"] or 560)
     w:SetHeight(B.Config().ioWindowHeight or 380)
     w:Show()
 
@@ -140,10 +113,6 @@ function B.ShowIOWindow(cfg)
     w.scroll:SetPoint("BOTTOMRIGHT", w, "BOTTOMRIGHT", -32, 44)
     w.strLabel:SetText(cfg.strLabel or "")
 
-    -- Settle the box's width BEFORE the text goes in, so the initial
-    -- wrap/highlight layout is computed against the final width, not
-    -- whatever it happened to be from the previous time this shared
-    -- window was shown.
     w.Reflow()
     w.editBox:SetText(cfg.text or "")
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-AscensionBags release builder.
+GrimfallBags release builder.
 
-Copies the addon source (AscensionBags/, Syndicator335/) into dist/,
+Copies the addon source (GrimfallBags/, Syndicator335/) into dist/,
 stripping Lua comments along the way. Source files are never modified --
 this only writes into dist/.
 
@@ -23,7 +23,7 @@ import shutil
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SRC_DIRS = ["AscensionBags", "Syndicator335"]
+SRC_DIRS = ["GrimfallBags", "Syndicator335"]
 DIST_DIR = os.path.join(ROOT, "dist")
 
 

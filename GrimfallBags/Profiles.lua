@@ -1,11 +1,4 @@
----------------------------------------------------------------------------
--- AscensionBags - Profiles
--- Save a snapshot of the display settings under a name, apply it, delete
--- it, share it as a string or clickable chat link (guild/whisper
--- friendly). Split out of Core.lua for SoC - this is all profile/
--- sharing logic, unrelated to config bootstrap or window chrome.
----------------------------------------------------------------------------
-local B = AscensionBags
+local B = GrimfallBags
 
 local PROFILE_KEYS = {
     "viewType", "showBagRow", "greyJunk",
@@ -45,14 +38,6 @@ function B.DeleteProfile(name)
     if cfg.activeProfile == name then cfg.activeProfile = nil end
 end
 
--- A profile export bundles the display settings AND the full category
--- ruleset (rules, tags, search expressions, pinned item IDs, protected
--- flags) so sharing one string/link hands over the whole setup, not
--- just view/column preferences. Wire format (JSON):
---   {"name": "...", "settings": {...}, "rules": [...]}
--- rules uses the exact same shape as B.RulesToArray()/ImportRulesArray().
--- name travels WITH the string (not just in the Chat Link marker) so
--- Import can auto-detect it - see ImportBoxName() in Options.lua.
 function B.ExportProfile(name)
     local p = B.Config().profiles[name]
     if not p then return "" end
@@ -68,10 +53,6 @@ function B.ExportProfile(name)
     return B.Json.Encode(obj)
 end
 
--- Old formats still floating around from before the JSON switch:
--- "key=value;key=value" (settings only), or that plus a "##RULES##"
--- marker followed by the (then pipe-delimited) rules string - see
--- B.ImportRules, which itself still falls back to the pipe format.
 local function ImportProfileLegacy(name, str)
     local settingsStr, rulesStr = str:match("^(.-)##RULES##(.*)$")
     settingsStr = settingsStr or str
@@ -95,7 +76,7 @@ local function ImportProfileLegacy(name, str)
         catCount = B.ImportRules(rulesStr)
     end
     if catCount > 0 then
-        print("|cff33aaff[AscensionBags]|r Also imported "..catCount.." categor"..(catCount == 1 and "y" or "ies")..".")
+        print("|cff33aaff[GrimfallBags]|r Also imported "..catCount.." categor"..(catCount == 1 and "y" or "ies")..".")
     end
     return true
 end
@@ -119,57 +100,33 @@ function B.ImportProfile(name, str)
         catCount = B.ImportRulesArray(obj.rules)
     end
     if catCount > 0 then
-        print("|cff33aaff[AscensionBags]|r Also imported "..catCount.." categor"..(catCount == 1 and "y" or "ies")..".")
+        print("|cff33aaff[GrimfallBags]|r Also imported "..catCount.." categor"..(catCount == 1 and "y" or "ies")..".")
     end
     return true
 end
 
----------------------------------------------------------------------------
--- Share profiles as clickable chat links (guild/whisper friendly)
---
--- IMPORTANT: we never send a real |H hyperlink over the wire. Ascension
--- (like most 3.3.5 cores) validates outgoing |H links against a whitelist
--- of Blizzard link types and silently drops the whole message if it sees
--- an unrecognized one (e.g. "ascbags") - not even echoed back to sender.
--- So the wire format is plain text with no pipes at all; each recipient's
--- client rewrites it into a real hyperlink locally, purely for display,
--- via a chat message filter - that rewritten text is never re-
--- transmitted, so it never hits the server's link validator.
---
--- NOT bracket-wrapped ("[MARKER:...]") like the old version: the payload
--- is now JSON, which legitimately contains "[" and "]" (arrays), so a
--- bracket-balanced wrapper would truncate at the first internal "]".
--- Instead: find the marker via a plain substring search (no pattern,
--- no escaping needed), and treat everything after it, to the end of
--- the message, as the JSON blob - the profile name travels inside
--- that JSON (see B.ProfileShareText) rather than as a separate field.
----------------------------------------------------------------------------
-local LINK_TYPE = "ascbags"
-local MARKER = "AscBagsProfile:"
+local LINK_TYPE = "gfbags"
+local MARKER = "GFBagsProfile:"
 
--- Plain-text marker to type/insert into chat - safe to send.
--- B.ExportProfile already embeds "name" in the JSON, so this just
--- prefixes the marker onto it.
 function B.ProfileShareText(name)
     local jsonStr = B.ExportProfile(name)
     if jsonStr == "" then return nil end
     return MARKER..jsonStr
 end
 
--- Real hyperlink, used only for local (received-message) display.
 local function BuildHyperlink(name, data)
     return "|cff33aaff|H"..LINK_TYPE..":"..name..":"..data.."|h["..name.."]|h|r"
 end
 
-StaticPopupDialogs["ASCBAGS_PROFILE_IMPORT_LINK"] = {
-    text = "Import AscensionBags profile '%s' shared in chat?\n(Overwrites any existing profile with that name.)",
+StaticPopupDialogs["GFBAGS_PROFILE_IMPORT_LINK"] = {
+    text = "Import GrimfallBags profile '%s' shared in chat?\n(Overwrites any existing profile with that name.)",
     button1 = ACCEPT or "Ok",
     button2 = CANCEL or "Cancel",
     OnAccept = function(self, data)
         if B.ImportProfile(data.name, data.str) then
-            print("|cff33aaff[AscensionBags]|r Profile '"..data.name.."' imported from chat link.")
+            print("|cff33aaff[GrimfallBags]|r Profile '"..data.name.."' imported from chat link.")
         else
-            print("|cff33aaff[AscensionBags]|r Import failed.")
+            print("|cff33aaff[GrimfallBags]|r Import failed.")
         end
     end,
     timeout = 0, whileDead = 1, hideOnEscape = 1,
@@ -179,16 +136,12 @@ local origSetItemRef = SetItemRef
 SetItemRef = function(link, text, button, chatFrame)
     local ltype, name, str = link:match("^("..LINK_TYPE.."):([^:]*):(.*)$")
     if ltype == LINK_TYPE then
-        StaticPopup_Show("ASCBAGS_PROFILE_IMPORT_LINK", name, nil, {name = name, str = str})
+        StaticPopup_Show("GFBAGS_PROFILE_IMPORT_LINK", name, nil, {name = name, str = str})
         return
     end
     origSetItemRef(link, text, button, chatFrame)
 end
 
--- Rewrite our plain marker into a clickable link, locally, on display
--- only. Finds the marker via plain substring search and treats
--- everything after it (to end of message) as the JSON payload - see
--- the note above on why this can't be a bracket-balanced pattern match.
 local function LinkifyFilter(self, event, msg, ...)
     local pos = msg:find(MARKER, 1, true)
     if not pos then return false end

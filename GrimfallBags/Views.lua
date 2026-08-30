@@ -1,17 +1,7 @@
----------------------------------------------------------------------------
--- AscensionBags - Views
--- Bag and bank windows: category view (flow layout) and single view,
--- search (Syndicator335 syntax), character selector with offline view,
--- bag-slot row, money, "New" category, icon details.
----------------------------------------------------------------------------
-local B = AscensionBags
+local B = GrimfallBags
 local S = Syndicator335
 local Log, Guard = B.Log, B.Guard
 
--- Layout constants. BTN (icon size) matches the standard in-game bag
--- icon size and isn't user-configurable. COLS is derived live from the
--- window's width (flexbox-style wrap, see SyncLayoutConstants), uncapped -
--- widening the window just fits more per row.
 local COLS, BTN = 12, 37
 local BTN_PAD   = 2
 local PAD       = 10
@@ -21,15 +11,8 @@ local FILTER_H  = 22
 local HEADER_H  = 16
 local WIDTH     = 0
 
-local bagView, bankView   -- created at PLAYER_LOGIN
+local bagView, bankView
 
----------------------------------------------------------------------------
--- "New" detection: if an itemID's count goes up, it counts as new for
--- recentSecs (green border + temp category at the top)
----------------------------------------------------------------------------
--- Both are persisted PER CHARACTER in the config, so not everything
--- counts as "new" after a relog. Expiry uses time() (epoch), not
--- GetTime() (session uptime, doesn't survive a restart).
 local recentItems = {}
 local baseline    = {}
 
@@ -42,7 +25,7 @@ local function LoadRecentState()
         st = {baseline = {}, recent = {}}
         cfg.newState[key] = st
     end
-    baseline    = st.baseline   -- direkte Referenzen -> speichert automatisch
+    baseline    = st.baseline
     recentItems = st.recent
 end
 
@@ -64,8 +47,6 @@ end
 local function UpdateRecent()
     local counts = CountBagItems()
     if next(baseline) == nil then
-        -- very first scan of this character: adopt as the baseline,
-        -- mark NOTHING as new
         for id, cnt in pairs(counts) do baseline[id] = cnt end
         return
     end
@@ -90,9 +71,6 @@ local function ExpireRecent()
     return changed
 end
 
----------------------------------------------------------------------------
--- View-Fabrik
----------------------------------------------------------------------------
 local function CreateView(name, titleText, bagIDs)
     local view = { bags = bagIDs, buttons = {}, obuttons = {}, headers = {},
                    sheaders = {}, bagParents = {},
@@ -125,9 +103,6 @@ local function CreateView(name, titleText, bagIDs)
     xb:SetPoint("TOPRIGHT", f, "TOPRIGHT", 2, 2)
     B.SkinClose(xb)
 
-    -- One parent frame per bag with SetID(bag): this makes Blizzard's
-    -- template handlers (tooltip, use, move, sell at a merchant) work
-    -- without any custom code.
     for _, bag in ipairs(bagIDs) do
         local p = CreateFrame("Frame", name.."Bag"..bag, f)
         p:SetID(bag)
@@ -137,9 +112,6 @@ local function CreateView(name, titleText, bagIDs)
     return view
 end
 
----------------------------------------------------------------------------
--- Button-Pools
----------------------------------------------------------------------------
 local function AcquireButton(view, bag)
     view.nBtn = view.nBtn + 1
     local btn = view.buttons[view.nBtn]
@@ -151,16 +123,6 @@ local function AcquireButton(view, bag)
         ilvl:SetPoint("TOPLEFT", btn, "TOPLEFT", 2, -2)
         ilvl:Hide()
         btn.ilvl = ilvl
-        -- IMPORTANT: do NOT override OnClick here. ContainerFrameItemButton-
-        -- Template is one of Blizzard's own secure-adjacent templates -
-        -- replacing its OnClick (even just to pass through to the original
-        -- handler) taints that button's entire click path permanently,
-        -- including totally unrelated clicks later (this caused a real
-        -- "tainted UseContainerItem" block when opening an unrelated loot
-        -- bag). Sell protection only touches OUR OWN frames instead: the
-        -- category header's right-click-sell and the toolbar bulk-sell
-        -- button, see Transfers.lua - individual click-to-sell at a
-        -- merchant can't be safely intercepted this way.
         view.buttons[view.nBtn] = btn
     else
         btn:SetParent(view.bagParents[bag])
@@ -169,7 +131,6 @@ local function AcquireButton(view, bag)
     return btn
 end
 
--- Offline display buttons: icon/count/border/tooltip, not clickable
 local function AcquireOfflineButton(view)
     view.nOBtn = view.nOBtn + 1
     local btn = view.obuttons[view.nOBtn]
@@ -191,10 +152,6 @@ local function AcquireOfflineButton(view)
     return btn
 end
 
--- Category headers are buttons: dragging an item onto one assigns its
--- tags to that category (= the item moves into this category).
--- Section headers (super-groups): full width, collapse arrow,
--- divider line - like the "Equipment"/"Crafting" rows in the original
 local function AcquireSectionHeader(view)
     view.nSHdr = view.nSHdr + 1
     local h = view.sheaders[view.nSHdr]
@@ -238,12 +195,10 @@ local function AcquireHeader(view)
         h:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         h:SetScript("OnClick", function(self, button)
             if button == "RightButton" then
-                -- Right-click a category header at a merchant to sell
-                -- everything in it. Shift skips the confirmation popup.
                 if not B.IsAtMerchant or not B.IsAtMerchant() then return end
                 if not self.cat or not self.items or #self.items == 0 then return end
                 if B.IsCategoryProtected and B.IsCategoryProtected(self.cat) then
-                    print("|cffff5555[AscensionBags]|r '"..self.cat.."' is a protected category - can't sell from it.")
+                    print("|cffff5555[GrimfallBags]|r '"..self.cat.."' is a protected category - can't sell from it.")
                     return
                 end
                 if IsShiftKeyDown() then
@@ -284,12 +239,6 @@ local function AcquireHeader(view)
     return h
 end
 
----------------------------------------------------------------------------
--- Fill buttons
----------------------------------------------------------------------------
--- Quality/new border as its own overlay texture.
--- IMPORTANT (3.3.5a/Ascension): GetNormalTexture() is unreliable on this
--- client (returns nil) -> never rely on it.
 local function EnsureBorder(btn)
     if btn.qborder then return btn.qborder end
     local t = btn:CreateTexture(nil, "OVERLAY")
@@ -316,15 +265,8 @@ local function ApplyBorder(btn, quality, isNew)
     end
 end
 
----------------------------------------------------------------------------
--- Transmog dot (purple, top right): item appearance not yet in the
--- collection. Detected via tooltip scan: Ascension writes the collected
--- status as a text line into the tooltip ("You've collected this
--- appearance" / "Hold CTRL + ALT and Click to collect this appearance
--- ..."). A hidden scan tooltip reads those lines out.
----------------------------------------------------------------------------
 local scanTip
-local tmogCache = {}   -- [itemID] = "collected" | "missing" | "none"
+local tmogCache = {}
 
 function B.WipeTmogCache()
     wipe(tmogCache)
@@ -337,20 +279,18 @@ local function GetTmogState(link)
     if cached then return cached end
 
     if not scanTip then
-        scanTip = CreateFrame("GameTooltip", "AscensionBagsScanTip", nil, "GameTooltipTemplate")
+        scanTip = CreateFrame("GameTooltip", "GrimfallBagsScanTip", nil, "GameTooltipTemplate")
         scanTip:SetOwner(UIParent, "ANCHOR_NONE")
     end
     scanTip:ClearLines()
     scanTip:SetHyperlink(link)
 
-    local state = "none"   -- no appearance line = not transmoggable
+    local state = "none"
     for i = 1, scanTip:NumLines() do
-        local line = _G["AscensionBagsScanTipTextLeft"..i]
+        local line = _G["GrimfallBagsScanTipTextLeft"..i]
         local text = line and line:GetText()
         if text then
             text = text:lower()
-            -- order matters: "collected this appearance" is NOT a
-            -- substring of the "collect this appearance" line
             if text:find("collected this appearance", 1, true) then
                 state = "collected"
                 break
@@ -373,7 +313,7 @@ local function ApplyTmogDot(btn, link)
         local t = btn:CreateTexture(nil, "OVERLAY", nil, 7)
         t:SetWidth(8); t:SetHeight(8)
         t:SetPoint("TOPRIGHT", btn, "TOPRIGHT", -2, -2)
-        t:SetTexture(0.7, 0.25, 0.95, 1)   -- purple
+        t:SetTexture(0.7, 0.25, 0.95, 1)
         t:Hide()
         btn.tmogDot = t
     end
@@ -383,7 +323,7 @@ local function ApplyTmogDot(btn, link)
         btn.tmogDot:Hide()
     end
 end
-B.ApplyTmogDot = ApplyTmogDot   -- also used by the guild bank window
+B.ApplyTmogDot = ApplyTmogDot
 
 local function ApplyILvl(btn, link, quality)
     if not btn.ilvl then return end
@@ -445,14 +385,6 @@ local function FillOfflineButton(btn, it, query)
     end
 end
 
----------------------------------------------------------------------------
--- Rendering
----------------------------------------------------------------------------
--- COLS (used by the flat single-list/grid view, where there are no
--- category blocks to pack) is derived from the frame's current width,
--- uncapped - recomputed on every refresh, including live during a
--- resize drag. The category view computes its own per-block cap the
--- same way, see maxBlockCols below.
 local function SyncLayoutConstants(view)
     COLS = math.max(1, math.floor((view.f:GetWidth() - PAD * 2 + BTN_PAD) / (BTN + BTN_PAD)))
 end
@@ -468,7 +400,6 @@ local function RefreshImpl(view)
     for i = 1, view.nSHdr do view.sheaders[i]:Hide() end
     view.nBtn, view.nOBtn, view.nHdr, view.nSHdr = 0, 0, 0, 0
 
-    -- Resolve offline data
     local off
     if view.offline then
         off = S.API.GetCharacter(view.offline.key)
@@ -485,12 +416,9 @@ local function RefreshImpl(view)
     local startY = -(PAD + TITLE_H + SEARCH_H + FILTER_H)
     local y      = startY
 
-    ------------------------------------------------------------------
-    -- Gather data -> groups/order (+free slots)
-    ------------------------------------------------------------------
     local groups, order = {}, {}
     local freeSlots, totalSlots = 0, 0
-    local singleList   -- single view only (live)
+    local singleList
 
     if off then
         local src = (view.offline.which == "bank") and off.bank or off.bags
@@ -553,11 +481,7 @@ local function RefreshImpl(view)
     end
     view.freeText:SetText(freeSlots.."/"..totalSlots)
 
-    ------------------------------------------------------------------
-    -- Layout
-    ------------------------------------------------------------------
     if singleList then
-        -- SINGLE: every slot including empty ones, bag order
         local col = 0
         for _, bag in ipairs(view.bags) do
             for slot = 1, GetContainerNumSlots(bag) or 0 do
@@ -572,9 +496,6 @@ local function RefreshImpl(view)
         end
         if col > 0 then y = y - (BTN + BTN_PAD) end
     else
-        -- CATEGORIES: sort items within each group VISUALLY -
-        -- by the configured sort method (type/quality/ilvl),
-        -- independent of the item's physical position in the bag
         for _, cat in ipairs(order) do
             table.sort(groups[cat], function(a, b)
                 local ka, kb = B.SortKey(a.l), B.SortKey(b.l)
@@ -584,7 +505,6 @@ local function RefreshImpl(view)
             end)
         end
 
-        -- Empty group
         local emptyGroup = {}
         if off then
             if freeSlots > 0 then
@@ -618,15 +538,11 @@ local function RefreshImpl(view)
             order[#order+1] = EMPTY_LABEL
         end
 
-        -- Display order: "New" first, then the rules in PRIORITY
-        -- order (the editor list!), rules sharing a super-group
-        -- (section) as one collapsible block together, then unknown
-        -- fallback categories alphabetically, "Empty" last.
         local cfgRules = B.Config().rules
         local present, usedCat, usedSection = {}, {}, {}
         for _, c in ipairs(order) do present[c] = true end
 
-        local seq = {}   -- blocks: {cat=...} or {section=..., cats={...}}
+        local seq = {}
         if present[B.RECENT_LABEL] then
             seq[#seq+1] = {cat = B.RECENT_LABEL}
             usedCat[B.RECENT_LABEL] = true
@@ -660,13 +576,6 @@ local function RefreshImpl(view)
         for _, c in ipairs(rest) do seq[#seq+1] = {cat = c} end
         if present[EMPTY_LABEL] then seq[#seq+1] = {cat = EMPTY_LABEL} end
 
-        -- Flow layout: real CSS-flexbox-style wrap. Each category is
-        -- its own block (header + icon grid), only wrapped internally
-        -- to a second row if it has more items than fit across the
-        -- whole window in one go. Blocks pack left to right using the
-        -- window's actual width and only drop to a new row when the
-        -- next block no longer fits in the remaining space - NOT one
-        -- category per row like a plain column grid would give you.
         local availWidth  = view.f:GetWidth() - PAD * 2
         local maxBlockCols = math.max(1, math.floor((availWidth + BTN_PAD) / (BTN + BTN_PAD)))
         local BLOCK_GAP  = 14
@@ -692,9 +601,6 @@ local function RefreshImpl(view)
             btn:SetPoint("TOPLEFT", view.f, "TOPLEFT", x, yy)
         end
 
-        -- Only live, real items (not offline-cache entries, not the
-        -- placeholder entries used for the "Empty" group) can actually
-        -- be sold by right-clicking a header.
         local function SellableItems(items)
             local out = {}
             for _, it in ipairs(items) do
@@ -742,8 +648,6 @@ local function RefreshImpl(view)
             if block.cat then
                 RenderCat(block.cat)
             else
-                -- Super-group: divider line + collapsible header row
-                -- (full window width - always its own row)
                 if rowX > 0 then NewRow() end
                 local sh = AcquireSectionHeader(view)
                 sh.section = block.section
@@ -782,13 +686,6 @@ function B.RefreshAll()
     if B.RefreshGuildBank then B.RefreshGuildBank() end
 end
 
----------------------------------------------------------------------------
--- Tracked currency: shown inline in the bottom bar next to the money
--- display, icon+count per currency reading right-to-left toward the
--- window's edge, money furthest right - matches how the real Baganator
--- addon (and Blizzard's own pre-replacement backpack) lays this out,
--- rather than a separate side panel.
----------------------------------------------------------------------------
 local function GetWatchedCurrencies()
     local list = {}
     for i = 1, GetCurrencyListSize() do
@@ -800,8 +697,6 @@ local function GetWatchedCurrencies()
     return list
 end
 
--- Called with the bag view (bank has no money row today, so nothing to
--- anchor a currency row to there either).
 local function RefreshCurrencyRow(view)
     if not view.moneyText then return end
     view.currencyPairs = view.currencyPairs or {}
@@ -822,9 +717,6 @@ local function RefreshCurrencyRow(view)
             pair.txt = txt
             pair:SetScript("OnEnter", function(self)
                 GameTooltip:SetOwner(self, "ANCHOR_TOP")
-                -- Built manually (name + count we already have) rather
-                -- than GameTooltip:SetCurrencyToken - that call doesn't
-                -- reliably show the currency's name on this client.
                 GameTooltip:SetText(self.currencyName, 1, 0.82, 0)
                 GameTooltip:AddLine(tostring(self.currencyCount), 1, 1, 1)
                 GameTooltip:Show()
@@ -847,13 +739,8 @@ local function RefreshCurrencyRow(view)
     end
 end
 B.RefreshCurrencyRow = RefreshCurrencyRow
+B.GetWatchedCurrencies = GetWatchedCurrencies
 
----------------------------------------------------------------------------
--- Mass-collect transmog appearances from every bag item in one click -
--- same underlying Ascension API (C_AppearanceCollection) as the /run
--- one-liner floating around, just as a toolbar button. Skips legendary+
--- quality (quality >= 5), matching that macro's own filter.
----------------------------------------------------------------------------
 local function CollectAllTransmog()
     for _, bag in ipairs(B.PLAYER_BAGS) do
         for slot = 1, GetContainerNumSlots(bag) or 0 do
@@ -866,18 +753,14 @@ local function CollectAllTransmog()
             end
         end
     end
-    B.WipeTmogCache()   -- collected status just changed - refresh the purple dots
+    B.WipeTmogCache()
     B.RefreshAll()
 end
 
----------------------------------------------------------------------------
--- Toolbar
----------------------------------------------------------------------------
 local function AddToolbar(view, isBank)
     local f = view.f
-    local tmogBtn   -- set below (bag window only), referenced later by bagsBtn's anchor
+    local tmogBtn
 
-    -- Icons on the right: sort, view, categories, options
     local gear = B.TitleIconButton(f, B.ASSETS.."Cog",
         "Options", function() B.ToggleOptions() end)
     gear:SetPoint("TOPRIGHT", f, "TOPRIGHT", -28, -(PAD - 2))
@@ -901,7 +784,6 @@ local function AddToolbar(view, isBank)
         end)
     sortBtn:SetPoint("RIGHT", viewBtn, "LEFT", -3, 0)
 
-    -- Transfer button (context-sensitive visibility, see Transfers.lua)
     local transBtn = B.TitleIconButton(f, B.ASSETS.."Transfer",
         "Transfer: sell/deposit matching items", function()
             if view.offline then return end
@@ -911,11 +793,14 @@ local function AddToolbar(view, isBank)
     transBtn:Hide()
     view.transferBtn = transBtn
 
-    -- Collect all transmog appearances from bag items (bag window only -
-    -- this is a live bag operation, not something offline character
-    -- views or the bank window need). Uses the built-in "INV_Misc_Statue_02"
-    -- icon since no custom asset was made for this button - renders fine,
-    -- just looks like a small golden urn/sack at this size.
+    -- Grimfall doesn't have a transmog system (this was Ascension-only
+    -- functionality) -- left commented rather than deleted in case
+    -- Grimfall adds one later, since CollectAllTransmog/B.InitTmogAPI/
+    -- the tmog-dot item overlay logic above are otherwise untouched and
+    -- ready to reactivate. bagsBtn below anchors to transBtn instead of
+    -- tmogBtn while this stays off, so the toolbar doesn't leave a gap
+    -- (or worse, anchor to a nil frame and error).
+    --[[
     if not isBank then
         tmogBtn = B.TitleIconButton(f, "Interface\\Icons\\INV_Misc_Statue_02",
             "Collect all transmog appearances from bags", function()
@@ -924,10 +809,10 @@ local function AddToolbar(view, isBank)
             end)
         tmogBtn:SetPoint("RIGHT", transBtn, "LEFT", -3, 0)
     end
+    --]]
 
-    -- Character selector (bag window only)
     if not isBank then
-        local charMenu = CreateFrame("Frame", "AscensionBagsCharMenu", UIParent, "UIDropDownMenuTemplate")
+        local charMenu = CreateFrame("Frame", "GrimfallBagsCharMenu", UIParent, "UIDropDownMenuTemplate")
         local charBtn = B.TitleIconButton(f, B.ASSETS.."All_Characters",
             "Characters: view bags/bank offline", function()
                 local myKey = S.CharKey()
@@ -963,9 +848,6 @@ local function AddToolbar(view, isBank)
         charBtn:SetPoint("TOPLEFT", f, "TOPLEFT", PAD - 2, -(PAD - 2))
     end
 
-    -- Search field spanning the full width, with a placeholder, a
-    -- magnifying-glass icon, and a clear ("x") button that only shows
-    -- once there's text to clear.
     local rowY = -(PAD + TITLE_H - 2)
     local sbox = CreateFrame("EditBox", f:GetName().."Search", f, "InputBoxTemplate")
     sbox:SetHeight(20)
@@ -973,8 +855,6 @@ local function AddToolbar(view, isBank)
     sbox:SetPoint("TOPRIGHT", f, "TOPRIGHT", -(PAD + 4), rowY)
     sbox:SetAutoFocus(false)
     sbox:SetMaxLetters(60)
-    -- Room on both sides for the icon/clear-button so typed text never
-    -- runs under either of them.
     sbox:SetTextInsets(16, 16, 0, 0)
 
     local searchIcon = sbox:CreateTexture(nil, "OVERLAY")
@@ -1000,10 +880,6 @@ local function AddToolbar(view, isBank)
     placeholder:SetPoint("LEFT", sbox, "LEFT", 16, 0)
     placeholder:SetTextColor(0.45, 0.45, 0.45)
     placeholder:SetText((SEARCH or "Search").."  (e.g. potion | food, >200 & boe, !junk)")
-    -- Quick-filter row (quality swatches + item-type shortcuts, GudaBags-
-    -- style): built below, but UpdateFilterHighlights is referenced here
-    -- as a forward declaration so typing a matching word by hand also
-    -- lights up the corresponding button.
     local UpdateFilterHighlights
 
     sbox:SetScript("OnTextChanged", function(self)
@@ -1018,17 +894,8 @@ local function AddToolbar(view, isBank)
     view.searchBox = sbox
     B.SkinEdit(sbox)
 
-    -- Defensive: an EditBox can retain keyboard focus across a Hide/Show
-    -- cycle on some clients even with SetAutoFocus(false) (which only
-    -- suppresses focus-on-FIRST-show), so typing right after opening the
-    -- window could land in the search box without ever clicking it.
-    -- Explicitly drop focus every time the window becomes visible.
     f:HookScript("OnShow", function() sbox:ClearFocus() end)
 
-    -- Quick-filter row: quality swatches + item-type shortcuts. Click
-    -- to set the search box to that term; click the SAME one again (or
-    -- type over it) to clear. All of these ride on the existing search
-    -- vocabulary (Syndicator335/Search.lua) - no separate filter engine.
     local filterRowY = rowY - SEARCH_H
     local filterBtns = {}
     local prevF
@@ -1118,7 +985,6 @@ local function AddToolbar(view, isBank)
         filterBtns[#filterBtns+1] = b
     end
 
-    -- Bag-slot row above the window (toggled via a button)
     if not isBank then
         local slotBtns = {}
         local prev
@@ -1177,10 +1043,34 @@ local function AddToolbar(view, isBank)
                 cfg.showBagRow = not cfg.showBagRow
                 view.UpdateBagRow()
             end)
-        bagsBtn:SetPoint("RIGHT", tmogBtn, "LEFT", -3, 0)
+
+        -- transBtn is hidden by default (Transfers.lua shows it only at
+        -- a merchant/bank with matching items) but its anchor slot is
+        -- always reserved, which left a visible gap in the toolbar
+        -- whenever it wasn't shown. Reflow bagsBtn onto sortBtn directly
+        -- when transBtn is hidden, and back onto transBtn when it
+        -- reappears, instead of always reserving its space.
+        local function RelayoutBagsBtn()
+            bagsBtn:ClearAllPoints()
+            if transBtn:IsShown() then
+                bagsBtn:SetPoint("RIGHT", transBtn, "LEFT", -3, 0)
+            else
+                bagsBtn:SetPoint("RIGHT", sortBtn, "LEFT", -3, 0)
+            end
+        end
+        RelayoutBagsBtn()
+        view.RelayoutBagsBtn = RelayoutBagsBtn
+
+        -- Currency panel toggle: named/gated after Blizzard's own
+        -- "Show on Backpack" currency option (see GetWatchedCurrencies),
+        -- so it only makes sense on the backpack view, not the bank.
+        local currencyBtn = B.TitleIconButton(f, "Interface\\Icons\\INV_Misc_Coin_02",
+            "Toggle tracked-currency panel", function()
+                if B.ToggleCurrencyPanel then B.ToggleCurrencyPanel() end
+            end)
+        currencyBtn:SetPoint("RIGHT", bagsBtn, "LEFT", -3, 0)
     end
 
-    -- Money (bag window only)
     if not isBank then
         local money = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         money:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -(PAD + 4), PAD - 2)
@@ -1188,9 +1078,6 @@ local function AddToolbar(view, isBank)
     end
 end
 
----------------------------------------------------------------------------
--- Open/close + replace Blizzard bags
----------------------------------------------------------------------------
 local function OpenBags()
     if not bagView then return end
     bagView.f:Show()
@@ -1205,25 +1092,16 @@ function B.ToggleBags()
 end
 B.OpenBags = OpenBags
 
--- Asked once: which addon should own bags/bank/guild bank when ElvUI is
--- also installed (ElvUI has its own bag windows - see the note above
--- PLAYER_ENTERING_WORLD's handler for why they'd otherwise both open).
--- Reuses the existing replaceBags/replaceBank/replaceGuildBank toggles -
--- "keep ElvUI's" is just those three flipped false, same as a player
--- unchecking them by hand in Options. hideOnEscape is deliberately off:
--- Blizzard's popup framework routes an Escape dismissal through OnCancel,
--- same as clicking button2, and button2 here has a real side effect
--- (switching to ElvUI) that an accidental Escape shouldn't trigger.
-StaticPopupDialogs["ASCBAGS_ELVUI_CHOICE"] = {
-    text = "ElvUI's own bag/bank windows were detected.\nUse AscensionBags, or keep ElvUI's?",
-    button1 = "Use AscensionBags",
+StaticPopupDialogs["GFBAGS_ELVUI_CHOICE"] = {
+    text = "ElvUI's own bag/bank windows were detected.\nUse GrimfallBags, or keep ElvUI's?",
+    button1 = "Use GrimfallBags",
     button2 = "Keep ElvUI's",
     OnAccept = function() B.Config().elvuiPromptShown = true end,
     OnCancel = function()
         local cfg = B.Config()
         cfg.replaceBags, cfg.replaceBank, cfg.replaceGuildBank = false, false, false
         cfg.elvuiPromptShown = true
-        print("|cff33aaff[AscensionBags]|r Switched to ElvUI's bags/bank - /reload to apply.")
+        print("|cff33aaff[GrimfallBags]|r Switched to ElvUI's bags/bank - /reload to apply.")
     end,
     timeout = 0, whileDead = 1, hideOnEscape = false,
 }
@@ -1233,33 +1111,11 @@ local function HookBagFunctions()
     _G["ToggleBackpack"] = B.ToggleBags
     _G["OpenBackpack"]   = OpenBags
     _G["CloseBackpack"]  = CloseBags
-    -- OpenAllBags aliased to the toggle (not a one-way open): the
-    -- Shift+B keybind calls OpenAllBags() on every press regardless of
-    -- state (Blizzard's own "are bags open" check looks at its own
-    -- hidden default bag frames, which we replace, so that check
-    -- always says "closed"). CloseAllBags must stay a plain one-way
-    -- close, though - Blizzard calls it defensively in other places
-    -- (e.g. Escape's "close everything" handler) expecting it to safely
-    -- do nothing when bags are already closed; making it a toggle too
-    -- meant Escape POPPED bags open instead of leaving them alone.
     _G["OpenAllBags"]    = B.ToggleBags
     _G["CloseAllBags"]   = CloseBags
     _G["ToggleBag"]      = B.ToggleBags
 end
 
--- Blizzard's personal bank window (BankFrame) is part of the always-
--- loaded core UI, unlike the guild bank (a separate lazy addon), so no
--- ADDON_LOADED gate is needed. Same caution as the guild bank: do NOT
--- Hide() it (could end the server-side banking session).
---
--- IMPORTANT: unlike the guild bank, do NOT use SetAlpha(0)/EnableMouse
--- (false) here - confirmed by testing that this breaks tooltips for
--- bank-slot items entirely (GameTooltip:SetBagItem on bank bag IDs
--- apparently depends on BankFrame being genuinely shown/interactive to
--- succeed, not just logically "open"). Instead, physically relocate it
--- off-screen: it stays fully real/functional from the game's
--- perspective (nothing disabled), just somewhere you'll never see or
--- click it, which avoids the tooltip issue entirely.
 local function HideBlizzardBank()
     if B.Config().replaceBank and BankFrame then
         BankFrame:HookScript("OnShow", function(f)
@@ -1270,9 +1126,6 @@ local function HideBlizzardBank()
     end
 end
 
----------------------------------------------------------------------------
--- Events
----------------------------------------------------------------------------
 local evt = CreateFrame("Frame")
 evt:RegisterEvent("PLAYER_LOGIN")
 evt:RegisterEvent("PLAYER_ENTERING_WORLD")
@@ -1288,7 +1141,7 @@ local dirty = false
 local expireTick = 0
 local resizeTick = 0
 evt:SetScript("OnUpdate", function(self, elapsed)
-    if not bagView then return end   -- vor PLAYER_LOGIN nichts tun
+    if not bagView then return end
     expireTick = expireTick + (elapsed or 0)
     if expireTick > 5 then
         expireTick = 0
@@ -1297,13 +1150,11 @@ evt:SetScript("OnUpdate", function(self, elapsed)
     if dirty then
         dirty = false
         Guard("UpdateRecent", UpdateRecent)
-        B.WipeTmogCache()   -- Sammel-Status kann sich geaendert haben
+        B.WipeTmogCache()
         Refresh(bagView)
         Refresh(bankView)
     end
 
-    -- Live column reflow while dragging the resize grip, throttled so
-    -- a full re-layout doesn't run every single frame during a drag.
     if bagView.resizeDirty or bankView.resizeDirty then
         resizeTick = resizeTick + (elapsed or 0)
         if resizeTick > 0.1 then
@@ -1318,24 +1169,17 @@ evt:SetScript("OnEvent", function(self, event)
     if event == "PLAYER_LOGIN" then
         Log("PLAYER_LOGIN: start")
         Guard("Init", function()
-            -- initial/fallback width only (used when no saved winWidth
-            -- exists yet); actual column count is always derived from
-            -- the frame's live width from here on, see SyncLayoutConstants
             WIDTH = PAD * 2 + 12 * (BTN + BTN_PAD)
             Log("Init: Config ok")
 
-            -- Hook B/Shift+B FIRST, before any window/toolbar building
-            -- below (which includes ElvUI skin calls and other more
-            -- exploratory code) - that way a failure further down this
-            -- function can never take the bag keybind down with it.
             HookBagFunctions()
             HideBlizzardBank()
             Log("Init: hooks ok")
 
             local me = UnitName("player")
-            bagView  = CreateView("AscensionBagsBackpack",
+            bagView  = CreateView("GrimfallBagsBackpack",
                                   me.." - "..(BACKPACK_TOOLTIP or "Backpack"), B.PLAYER_BAGS)
-            bankView = CreateView("AscensionBagsBank",
+            bankView = CreateView("GrimfallBagsBank",
                                   me.." - "..(BANK or "Bank"), B.BANK_BAGS)
             B.bagView, B.bankView = bagView, bankView
             Log("Init: views created")
@@ -1347,48 +1191,31 @@ evt:SetScript("OnEvent", function(self, event)
             RefreshCurrencyRow(bagView)
             Log("Init: currency row ok")
 
-            B.RestorePosition(bagView.f, "AscensionBagsBackpack",
+            if B.InitCurrencyPanel then B.InitCurrencyPanel() end
+
+            B.RestorePosition(bagView.f, "GrimfallBagsBackpack",
                 {"BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", -50, 100})
-            B.RestorePosition(bankView.f, "AscensionBagsBank",
+            B.RestorePosition(bankView.f, "GrimfallBagsBank",
                 {"TOPLEFT", UIParent, "TOPLEFT", 50, -104})
-            B.RestoreWidth(bagView.f, "AscensionBagsBackpack", WIDTH)
-            B.RestoreWidth(bankView.f, "AscensionBagsBank", WIDTH)
+            B.RestoreWidth(bagView.f, "GrimfallBagsBackpack", WIDTH)
+            B.RestoreWidth(bankView.f, "GrimfallBagsBank", WIDTH)
 
             if IsAddOnLoaded("ElvUI") and not B.Config().elvuiPromptShown then
-                StaticPopup_Show("ASCBAGS_ELVUI_CHOICE")
+                StaticPopup_Show("GFBAGS_ELVUI_CHOICE")
             end
 
-            -- load the persistent "new" tracking state; the baseline
-            -- scan happens on the first BAG_UPDATE (links are often
-            -- still nil right at PLAYER_LOGIN)
             LoadRecentState()
             Log("Init: recent-item state loaded")
 
-            -- seed the default categories as editable rules on first
-            -- start (visible/editable in the category editor)
             B.SeedDefaultCategories()
             B.SeedBiSCategory()
 
-            -- initialize transmog detection (see log)
             B.InitTmogAPI()
         end)
         Log("PLAYER_LOGIN: end")
-        print("|cff33aaff[AscensionBags]|r loaded  |cffffcc00/ascbags|r opens it, /ascbags log shows the log.")
+        print("|cff33aaff[GrimfallBags]|r loaded  |cffffcc00/gfbags|r opens it, /gfbags log shows the log.")
 
     elseif event == "PLAYER_ENTERING_WORLD" then
-        -- Re-assert our replacement of OpenBackpack/ToggleBag/etc. AFTER
-        -- everything else has had a chance to run theirs. Some addons
-        -- (e.g. ElvUI's Bags module) use hooksecurefunc-style hooking,
-        -- which WRAPS whatever function is currently in the global slot
-        -- instead of replacing it - if their hook installs after ours,
-        -- calling e.g. OpenBackpack() ends up calling both bag UIs
-        -- (ours AND theirs), which is exactly the double-bag-window bug.
-        -- Our own HookBagFunctions does a plain overwrite, so as long as
-        -- we run LAST, any such wrapper gets discarded and only our
-        -- window opens. PLAYER_ENTERING_WORLD reliably fires after every
-        -- addon's PLAYER_LOGIN handling is done, so re-running here wins
-        -- the race regardless of addon load order. Cheap/idempotent, so
-        -- safe to re-run on every zone change too.
         Guard("ReassertBagHooks", HookBagFunctions)
 
     elseif event == "BAG_UPDATE" or event == "ITEM_LOCK_CHANGED"
@@ -1397,6 +1224,7 @@ evt:SetScript("OnEvent", function(self, event)
 
     elseif event == "CURRENCY_DISPLAY_UPDATE" then
         Guard("RefreshCurrency", RefreshCurrencyRow, bagView)
+        if B.RefreshCurrencyPanel then Guard("RefreshCurrencyPanel", B.RefreshCurrencyPanel) end
 
     elseif event == "BANKFRAME_OPENED" then
         if bankView then
@@ -1412,7 +1240,6 @@ evt:SetScript("OnEvent", function(self, event)
     end
 end)
 
--- Syndicator335 reports data changes (e.g. guild bank scan finished)
 S.OnDataChanged = function(what)
     if what == "guild" and B.RefreshGuildBank then B.RefreshGuildBank() end
 end
