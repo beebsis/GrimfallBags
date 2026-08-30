@@ -20,6 +20,13 @@ A bag, bank, and guild bank replacement for **World of Warcraft 3.3.5a** on **Gr
 
 Bulk transmog-appearance collection is present in the code but currently disabled (commented out, not deleted) - Grimfall doesn't have a transmog system yet. See [Notes for contributors](#notes-for-contributors).
 
+## Branches
+
+- `developer` (this branch) - full source with comments, where active work happens
+- `main` - the default branch, a comment-stripped build kept in sync with `developer` at each release, tagged (`v1.2.0`, etc.) for every version
+
+If you just want to install the addon, use `main` or a tagged release. This branch is for development.
+
 ## Requirements
 
 - WoW client: 3.3.5a (`Interface: 30300`)
@@ -97,8 +104,8 @@ Priority (top of the list wins) determines match order and is independent of sec
 
 ## Building a release
 
-Source files keep their comments for development. To produce a comment-stripped copy for
-a release/upload:
+Source files keep their comments for development on this branch. To cut a release onto
+`main`:
 
 ```bash
 python tools/build_release.py
@@ -108,6 +115,11 @@ This writes a full copy of `GrimfallBags/` and `Syndicator335/` into `dist/`, wi
 comments removed (both whole-line and inline trailing comments) and everything else
 (`.toc`, `Assets/`) copied unchanged. Your working source is never modified. `dist/` is
 git-ignored - regenerate it whenever you cut a release.
+
+Then check out `main`, copy `dist/GrimfallBags/` and `dist/Syndicator335/` over the
+existing folders, bump the version in `GrimfallBags.toc` and `Core.lua`, commit, and tag
+the commit (e.g. `git tag v1.2.1`). Push both the commit and the tag, then create a
+GitHub Release from that tag.
 
 Note: the stripper bails out and copies a file as-is (with a warning) if it contains a
 `[[` long-bracket string or block comment, rather than risk mishandling one. `Views.lua`
