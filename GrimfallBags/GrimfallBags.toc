@@ -14,7 +14,6 @@ Profiles.lua
 Json.lua
 Categories.lua
 Views.lua
-CurrencyPanel.lua
 GuildBank.lua
 Sorting.lua
 Transfers.lua

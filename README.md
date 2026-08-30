@@ -12,7 +12,7 @@ A bag, bank, and guild bank replacement for **World of Warcraft 3.3.5a** on **Gr
 - **Context-aware transfer button** - sell junk/matching items at a merchant, deposit or withdraw matching items at the bank
 - **Guild bank replacement**, with offline/remote viewing of tabs you've already scanned
 - **View other characters' bags/bank offline**, via Syndicator335's tracked data
-- **Tracked currency** shown inline with your gold, plus an optional docked panel (toggle from the toolbar) listing every currency you've flagged "Show on Backpack" with name, icon, and count
+- **Tracked currency** shown inline with your gold
 - **Automation** - auto-open bags at merchants/mailboxes, auto-repair (prefers guild funds)
 - **Profiles** - save, apply, export/import, or share (via chat link) your display settings and full category setup
 - **ElvUI integration** - detects ElvUI on login and asks which addon should own your bags/bank/guild bank, plus an optional skin that matches ElvUI's look
@@ -87,7 +87,6 @@ Priority (top of the list wins) determines match order and is independent of sec
   - `Json.lua` - minimal JSON encode/decode (profile/category export format)
   - `Categories.lua` - category rules, the category editor, tag/section logic
   - `Views.lua` - bag/bank windows: layout, search, toolbar, currency, transmog
-  - `CurrencyPanel.lua` - docked panel listing tracked ("Show on Backpack") currencies
   - `GuildBank.lua` - guild bank window
   - `Sorting.lua` - async in-place bag sort
   - `Transfers.lua` - merchant/bank transfer + category sell

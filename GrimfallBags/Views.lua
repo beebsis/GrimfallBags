@@ -739,7 +739,19 @@ local function RefreshCurrencyRow(view)
     end
 end
 B.RefreshCurrencyRow = RefreshCurrencyRow
-B.GetWatchedCurrencies = GetWatchedCurrencies
+
+-- Toggling "Show on Backpack" in Blizzard's own Currency tab context menu
+-- (TokenFramePopup) calls SetCurrencyBackpack() directly -- confirmed
+-- live, CURRENCY_DISPLAY_UPDATE doesn't reliably fire for that specific
+-- change, only for amount changes, so the bottom currency row was only
+-- ever catching up on the next window open. Hooking the Blizzard
+-- function itself guarantees a refresh exactly when the checkbox
+-- changes, regardless of what event (if any) accompanies it.
+if type(SetCurrencyBackpack) == "function" then
+    hooksecurefunc("SetCurrencyBackpack", function()
+        if bagView then RefreshCurrencyRow(bagView) end
+    end)
+end
 
 local function CollectAllTransmog()
     for _, bag in ipairs(B.PLAYER_BAGS) do
@@ -1060,15 +1072,6 @@ local function AddToolbar(view, isBank)
         end
         RelayoutBagsBtn()
         view.RelayoutBagsBtn = RelayoutBagsBtn
-
-        -- Currency panel toggle: named/gated after Blizzard's own
-        -- "Show on Backpack" currency option (see GetWatchedCurrencies),
-        -- so it only makes sense on the backpack view, not the bank.
-        local currencyBtn = B.TitleIconButton(f, "Interface\\Icons\\INV_Misc_Coin_02",
-            "Toggle tracked-currency panel", function()
-                if B.ToggleCurrencyPanel then B.ToggleCurrencyPanel() end
-            end)
-        currencyBtn:SetPoint("RIGHT", bagsBtn, "LEFT", -3, 0)
     end
 
     if not isBank then
@@ -1191,8 +1194,6 @@ evt:SetScript("OnEvent", function(self, event)
             RefreshCurrencyRow(bagView)
             Log("Init: currency row ok")
 
-            if B.InitCurrencyPanel then B.InitCurrencyPanel() end
-
             B.RestorePosition(bagView.f, "GrimfallBagsBackpack",
                 {"BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", -50, 100})
             B.RestorePosition(bankView.f, "GrimfallBagsBank",
@@ -1224,7 +1225,6 @@ evt:SetScript("OnEvent", function(self, event)
 
     elseif event == "CURRENCY_DISPLAY_UPDATE" then
         Guard("RefreshCurrency", RefreshCurrencyRow, bagView)
-        if B.RefreshCurrencyPanel then Guard("RefreshCurrencyPanel", B.RefreshCurrencyPanel) end
 
     elseif event == "BANKFRAME_OPENED" then
         if bankView then

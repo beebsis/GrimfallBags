@@ -43,7 +43,6 @@ local DEFAULTS = {
     autoRepair       = false,
     elvuiPromptShown = false,
     elvuiSkin        = true,
-    showCurrencyPanel = false,
     pos          = {},
     winWidth     = {},
     rules        = {},
