@@ -42,6 +42,7 @@ local DEFAULTS = {
     autoOpenMailbox  = false,
     autoRepair       = false,
     elvuiPromptShown = false,
+    elvuiBagsMigrationPrompted = false,
     elvuiSkin        = true,
     pos          = {},
     winWidth     = {},
@@ -88,6 +89,12 @@ SlashCmdList["GrimfallBags"] = function(msg)
         print("|cff33aaff[GrimfallBags]|r Log cleared.")
     elseif msg == "options" then
         if B.ToggleOptions then B.ToggleOptions() end
+    elseif msg == "disableelvuibags" then
+        if not IsAddOnLoaded("ElvUI") then
+            print("|cffff3333[GrimfallBags]|r ElvUI isn't loaded.")
+        elseif not (B.DisableElvUIBags and B.DisableElvUIBags()) then
+            print("|cffff3333[GrimfallBags]|r Couldn't disable ElvUI's bags.")
+        end
     elseif msg == "currencydebug" then
         if not B.GetWatchedCurrencies then
             print("|cff33aaff[GrimfallBags]|r GetWatchedCurrencies not available.")

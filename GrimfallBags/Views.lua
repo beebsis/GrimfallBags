@@ -123,10 +123,27 @@ local function AcquireButton(view, bag)
         ilvl:SetPoint("TOPLEFT", btn, "TOPLEFT", 2, -2)
         ilvl:Hide()
         btn.ilvl = ilvl
+        btn:SetScript("OnEnter", function(self)
+            if not self.bag then return end
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            Guard("BagItemTooltip", function()
+                GameTooltip:SetBagItem(self.bag, self:GetID())
+            end)
+            if GameTooltip:NumLines() == 0 then
+                if self.link then
+                    Guard("BagItemTooltipFallback", function()
+                        GameTooltip:SetHyperlink(self.link)
+                    end)
+                end
+                if GameTooltip:NumLines() == 0 then GameTooltip:Hide() end
+            end
+        end)
+        btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
         view.buttons[view.nBtn] = btn
     else
         btn:SetParent(view.bagParents[bag])
     end
+    btn.bag = bag
     btn:Show()
     return btn
 end
@@ -344,6 +361,7 @@ local function FillLiveButton(btn, bag, slot, query)
     btn:SetID(slot)
     local texture, count, locked, quality = GetContainerItemInfo(bag, slot)
     local link = GetContainerItemLink(bag, slot)
+    btn.link = link
 
     SetItemButtonTexture(btn, texture)
     SetItemButtonCount(btn, count)
@@ -1095,16 +1113,63 @@ function B.ToggleBags()
 end
 B.OpenBags = OpenBags
 
+local function DisableElvUIBags()
+    local disabled = false
+    if IsAddOnLoaded("ElvUI") then
+        pcall(function()
+            local E = unpack(ElvUI)
+            if E.private and E.private.bags then
+                E.private.bags.enable = false
+                disabled = true
+            end
+        end)
+    end
+    if disabled then
+        print("|cff33aaff[GrimfallBags]|r Disabled ElvUI's bags/bank windows - /reload to apply.")
+    end
+    return disabled
+end
+B.DisableElvUIBags = DisableElvUIBags
+
+local function ElvUIBagsStillEnabled()
+    if not IsAddOnLoaded("ElvUI") then return false end
+    local ok, enabled = pcall(function()
+        local E = unpack(ElvUI)
+        return E.private and E.private.bags and E.private.bags.enable
+    end)
+    return ok and enabled
+end
+
 StaticPopupDialogs["GFBAGS_ELVUI_CHOICE"] = {
     text = "ElvUI's own bag/bank windows were detected.\nUse GrimfallBags, or keep ElvUI's?",
     button1 = "Use GrimfallBags",
     button2 = "Keep ElvUI's",
-    OnAccept = function() B.Config().elvuiPromptShown = true end,
+    OnAccept = function()
+        local cfg = B.Config()
+        cfg.elvuiPromptShown = true
+        cfg.elvuiBagsMigrationPrompted = true
+        DisableElvUIBags()
+    end,
     OnCancel = function()
         local cfg = B.Config()
         cfg.replaceBags, cfg.replaceBank, cfg.replaceGuildBank = false, false, false
         cfg.elvuiPromptShown = true
+        cfg.elvuiBagsMigrationPrompted = true
         print("|cff33aaff[GrimfallBags]|r Switched to ElvUI's bags/bank - /reload to apply.")
+    end,
+    timeout = 0, whileDead = 1, hideOnEscape = false,
+}
+
+StaticPopupDialogs["GFBAGS_ELVUI_STILL_ENABLED"] = {
+    text = "GrimfallBags is set to replace your bags, but ElvUI's own bag/bank windows are still enabled.\nDisable ElvUI's bags/bank windows now?",
+    button1 = "Yes, disable ElvUI's",
+    button2 = "No, leave as-is",
+    OnAccept = function()
+        B.Config().elvuiBagsMigrationPrompted = true
+        DisableElvUIBags()
+    end,
+    OnCancel = function()
+        B.Config().elvuiBagsMigrationPrompted = true
     end,
     timeout = 0, whileDead = 1, hideOnEscape = false,
 }
@@ -1201,8 +1266,12 @@ evt:SetScript("OnEvent", function(self, event)
             B.RestoreWidth(bagView.f, "GrimfallBagsBackpack", WIDTH)
             B.RestoreWidth(bankView.f, "GrimfallBagsBank", WIDTH)
 
-            if IsAddOnLoaded("ElvUI") and not B.Config().elvuiPromptShown then
+            local ecfg = B.Config()
+            if IsAddOnLoaded("ElvUI") and not ecfg.elvuiPromptShown then
                 StaticPopup_Show("GFBAGS_ELVUI_CHOICE")
+            elseif ecfg.replaceBags and not ecfg.elvuiBagsMigrationPrompted
+                   and ElvUIBagsStillEnabled() then
+                StaticPopup_Show("GFBAGS_ELVUI_STILL_ENABLED")
             end
 
             LoadRecentState()
