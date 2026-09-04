@@ -129,12 +129,15 @@ local function Build()
         end)
         btn:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            if atGuildBank then
-                GameTooltip:SetGuildBankItem(currentTab, self.slot)
-            elseif self.link then
-                GameTooltip:SetHyperlink(self.link)
-            end
-            GameTooltip:Show()
+            local ok = Guard("GBItemTooltip", function()
+                if atGuildBank then
+                    GameTooltip:SetGuildBankItem(currentTab, self.slot)
+                elseif self.link then
+                    GameTooltip:SetHyperlink(self.link)
+                end
+                GameTooltip:Show()
+            end)
+            if not ok then GameTooltip:Hide() end
         end)
         btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
         buttons[i] = btn
