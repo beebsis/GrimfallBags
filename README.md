@@ -2,6 +2,57 @@
 
 A bag, bank, and guild bank replacement for **World of Warcraft 3.3.5a** on **Grimfall**, based on the retail addon [Baganator](https://www.curseforge.com/wow/addons/baganator) - there was never a 3.3.5a version, only retail, so this brings it to 3.3.5a and continues it with new features and fixes.
 
+## Screenshots
+
+<table>
+<tr>
+<td width="50%">
+
+**Category view** (backpack)
+<img src="images/grimfall1.png" width="100%">
+
+</td>
+<td width="50%">
+
+**Single-list view** (backpack)
+<img src="images/grimfall4.png" width="100%">
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+**Customize window - General**
+<img src="images/grimfall2.png" width="100%">
+
+</td>
+<td width="50%">
+
+**Customize window - Categories**
+<img src="images/grimfall3.png" width="100%">
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+**Bank + backpack**
+<img src="images/grimfall6.png" width="100%">
+
+</td>
+<td width="50%">
+
+**Guild bank + backpack**
+<img src="images/grimfall7.png" width="100%">
+
+</td>
+</tr>
+</table>
+
+**Viewing another character's bags/bank offline**, via Syndicator335's tracked data:
+
+<img src="images/grimfall5.png" width="60%">
+
 ## Branches
 
 - `main` (this branch) - the addon, ready to install, comment-stripped, tagged (`v1.2.0`, etc.) for every version
