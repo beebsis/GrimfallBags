@@ -1251,10 +1251,21 @@ end
 
 local function HideBlizzardBank()
     if B.Config().replaceBank and BankFrame then
-        BankFrame:HookScript("OnShow", function(f)
-            f:Hide()
+        -- Hide() would trigger OnHide -> CloseBankFrame(), ending the bank
+        -- interaction server-side, so keep it shown but pin it off-screen.
+        local repositioning = false
+        local function PushOffscreen(f)
+            if repositioning then return end
+            repositioning = true
+            f:ClearAllPoints()
+            f:SetPoint("CENTER", UIParent, "CENTER", 10000, 10000)
+            repositioning = false
+        end
+        BankFrame:HookScript("OnShow", PushOffscreen)
+        hooksecurefunc(BankFrame, "SetPoint", function(f)
+            if not repositioning then PushOffscreen(f) end
         end)
-        Log("Blizzard bank hidden")
+        Log("Blizzard bank moved off-screen")
     end
 end
 
