@@ -407,6 +407,10 @@ local function SyncLayoutConstants(view)
     COLS = math.max(1, math.floor((view.f:GetWidth() - PAD * 2 + BTN_PAD) / (BTN + BTN_PAD)))
 end
 
+local function ChromeExtraHeight(cfg)
+    return cfg.showSearchFilters and (SEARCH_H + FILTER_H) or 0
+end
+
 local function RefreshImpl(view)
     if not view.f:IsShown() then return end
     SyncLayoutConstants(view)
@@ -431,7 +435,7 @@ local function RefreshImpl(view)
     end
 
     local query  = (view.searchStr or ""):lower()
-    local startY = -(PAD + TITLE_H + SEARCH_H + FILTER_H)
+    local startY = -(PAD + TITLE_H + ChromeExtraHeight(cfg))
     local y      = startY
 
     local groups, order = {}, {}
@@ -915,8 +919,8 @@ local function AddToolbar(view, isBank)
     sbox:SetScript("OnTextChanged", function(self)
         view.searchStr = self:GetText()
         local hasText = self:GetText() ~= ""
-        placeholder:SetShown(not hasText)
-        clearBtn:SetShown(hasText)
+        if hasText then placeholder:Hide() else placeholder:Show() end
+        if hasText then clearBtn:Show() else clearBtn:Hide() end
         if UpdateFilterHighlights then UpdateFilterHighlights() end
         Refresh(view)
     end)
@@ -926,17 +930,27 @@ local function AddToolbar(view, isBank)
 
     f:HookScript("OnShow", function() sbox:ClearFocus() end)
 
-    local filterRowY = rowY - SEARCH_H
-    local filterBtns = {}
-    local prevF
+    local qualityBtns, typeBtns = {}, {}
 
-    local function PlaceFilterBtn(b, gap)
-        if prevF then
-            b:SetPoint("LEFT", prevF, "RIGHT", gap or 4, 0)
-        else
-            b:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + 6, filterRowY)
+    local function RelayoutFilterRow()
+        local shown = B.Config().showSearchFilters
+        local y = rowY - SEARCH_H
+        local prev
+        local function place(b, gap)
+            b:ClearAllPoints()
+            if prev then
+                b:SetPoint("LEFT", prev, "RIGHT", gap, 0)
+            else
+                b:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + 6, y)
+            end
+            prev = b
         end
-        prevF = b
+        for _, b in ipairs(qualityBtns) do
+            if shown then b:Show(); place(b, 3) else b:Hide() end
+        end
+        for i, b in ipairs(typeBtns) do
+            if shown then b:Show(); place(b, i == 1 and 10 or 4) else b:Hide() end
+        end
     end
 
     local function ApplyQuickFilter(word)
@@ -949,8 +963,11 @@ local function AddToolbar(view, isBank)
 
     UpdateFilterHighlights = function()
         local cur = sbox:GetText():lower()
-        for _, b in ipairs(filterBtns) do
-            b.sel:SetShown(b.word == cur)
+        for _, b in ipairs(qualityBtns) do
+            if b.word == cur then b.sel:Show() else b.sel:Hide() end
+        end
+        for _, b in ipairs(typeBtns) do
+            if b.word == cur then b.sel:Show() else b.sel:Hide() end
         end
     end
 
@@ -961,7 +978,6 @@ local function AddToolbar(view, isBank)
     for _, qf in ipairs(QUALITY_FILTERS) do
         local b = CreateFrame("Button", nil, f)
         b:SetSize(14, 14)
-        PlaceFilterBtn(b, 3)
 
         local r, g, bl = GetItemQualityColor(qf.q)
         local swatch = b:CreateTexture(nil, "ARTWORK")
@@ -985,7 +1001,7 @@ local function AddToolbar(view, isBank)
             GameTooltip:Show()
         end)
         b:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        filterBtns[#filterBtns+1] = b
+        qualityBtns[#qualityBtns+1] = b
     end
 
     local TYPE_FILTERS = {
@@ -1001,7 +1017,6 @@ local function AddToolbar(view, isBank)
         lbl:SetPoint("CENTER")
         lbl:SetText(tf.label)
         b:SetWidth(lbl:GetStringWidth() + 10)
-        PlaceFilterBtn(b, i == 1 and 10 or 4)
 
         local sel = b:CreateTexture(nil, "BACKGROUND")
         sel:SetAllPoints()
@@ -1012,9 +1027,28 @@ local function AddToolbar(view, isBank)
 
         b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
         b:SetScript("OnClick", function() ApplyQuickFilter(tf.word) end)
-        filterBtns[#filterBtns+1] = b
+        typeBtns[#typeBtns+1] = b
     end
 
+    local function UpdateSearchBarVisibility()
+        if B.Config().showSearchFilters then sbox:Show() else sbox:Hide() end
+    end
+
+    local function UpdateFilterVisibility()
+        UpdateSearchBarVisibility()
+        RelayoutFilterRow()
+        Refresh(view)
+    end
+    UpdateFilterVisibility()
+
+    local filtersBtn = B.TitleIconButton(f, B.ASSETS.."Search",
+        "Show/hide search & filters", function()
+            local cfg = B.Config()
+            cfg.showSearchFilters = not cfg.showSearchFilters
+            UpdateFilterVisibility()
+        end)
+
+    local bagsBtn
     if not isBank then
         local slotBtns = {}
         local prev
@@ -1067,7 +1101,7 @@ local function AddToolbar(view, isBank)
             end
         end
 
-        local bagsBtn = B.TitleIconButton(f, B.ASSETS.."Bags",
+        bagsBtn = B.TitleIconButton(f, B.ASSETS.."Bags",
             "Show/hide bag slots", function()
                 local cfg = B.Config()
                 cfg.showBagRow = not cfg.showBagRow
@@ -1156,6 +1190,19 @@ local function AddToolbar(view, isBank)
             end
         end
     end
+
+    local function RelayoutFiltersBtn()
+        filtersBtn:ClearAllPoints()
+        if bagsBtn then
+            filtersBtn:SetPoint("RIGHT", bagsBtn, "LEFT", -3, 0)
+        elseif transBtn:IsShown() then
+            filtersBtn:SetPoint("RIGHT", transBtn, "LEFT", -3, 0)
+        else
+            filtersBtn:SetPoint("RIGHT", sortBtn, "LEFT", -3, 0)
+        end
+    end
+    RelayoutFiltersBtn()
+    if isBank then view.RelayoutFiltersBtn = RelayoutFiltersBtn end
 
     if not isBank then
         local money = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")

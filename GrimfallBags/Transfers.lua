@@ -195,6 +195,7 @@ function B.UpdateTransferButtons()
                 view.transferBtn:Hide()
             end
             if view.RelayoutBagsBtn then view.RelayoutBagsBtn() end
+            if view.RelayoutFiltersBtn then view.RelayoutFiltersBtn() end
         end
     end
     set(B.bagView, atMerchant or atBank,
