@@ -1,7 +1,7 @@
 local B = {}
 _G["GrimfallBags"] = B
 
-B.VERSION = "1.2.3"
+B.VERSION = "1.2.4"
 
 local LOG_MAX = 200
 B.log = {}
