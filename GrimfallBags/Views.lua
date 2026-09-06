@@ -1252,10 +1252,9 @@ end
 local function HideBlizzardBank()
     if B.Config().replaceBank and BankFrame then
         BankFrame:HookScript("OnShow", function(f)
-            f:ClearAllPoints()
-            f:SetPoint("CENTER", UIParent, "CENTER", 10000, 10000)
+            f:Hide()
         end)
-        Log("Blizzard bank moved off-screen")
+        Log("Blizzard bank hidden")
     end
 end
 
