@@ -1,7 +1,7 @@
 local B = {}
 _G["GrimfallBags"] = B
 
-B.VERSION = "1.2.4"
+B.VERSION = "1.2.5"
 
 local LOG_MAX = 200
 B.log = {}
@@ -27,6 +27,7 @@ end
 local DEFAULTS = {
     viewType     = "category",
     showBagRow   = false,
+    showSearchFilters = true,
     greyJunk     = true,
     showILvl     = true,
     recentSecs   = 120,
