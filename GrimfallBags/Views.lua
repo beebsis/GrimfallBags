@@ -125,10 +125,19 @@ local function AcquireButton(view, bag)
         btn.ilvl = ilvl
         btn:SetScript("OnEnter", function(self)
             if not self.bag then return end
+            if GameTooltip:IsShown() and GameTooltip:GetOwner() == self
+               and self.tooltipLink == self.link then
+                return
+            end
+            self.tooltipLink = self.link
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            Guard("BagItemTooltip", function()
-                GameTooltip:SetBagItem(self.bag, self:GetID())
-            end)
+            GameTooltip.updateTooltip = nil
+            -- SetBagItem(-1, slot) never works here and still leaves the tooltip auto-hiding after; skip it for the main bank container.
+            if self.bag ~= -1 then
+                Guard("BagItemTooltip", function()
+                    GameTooltip:SetBagItem(self.bag, self:GetID())
+                end)
+            end
             if GameTooltip:NumLines() == 0 then
                 if self.link then
                     Guard("BagItemTooltipFallback", function()
@@ -416,7 +425,11 @@ local function RefreshImpl(view)
     SyncLayoutConstants(view)
     local cfg = B.Config()
 
-    for i = 1, view.nBtn  do view.buttons[i]:Hide()  end
+    -- Skip hiding whatever button GameTooltip is anchored to, so a refresh doesn't invalidate its owner.
+    local keepBtn = GameTooltip:IsShown() and GameTooltip:GetOwner()
+    for i = 1, view.nBtn do
+        if view.buttons[i] ~= keepBtn then view.buttons[i]:Hide() end
+    end
     for i = 1, view.nOBtn do view.obuttons[i]:Hide() end
     for i = 1, view.nHdr  do view.headers[i]:Hide()  end
     for i = 1, view.nSHdr do view.sheaders[i]:Hide() end
