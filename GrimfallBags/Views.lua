@@ -131,7 +131,7 @@ local function AcquireButton(view, bag)
             end
             self.tooltipLink = self.link
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip.updateTooltip = nil
+            GameTooltip.updateTooltip = 0
             -- SetBagItem(-1, slot) never works here and still leaves the tooltip auto-hiding after; skip it for the main bank container.
             if self.bag ~= -1 then
                 Guard("BagItemTooltip", function()
