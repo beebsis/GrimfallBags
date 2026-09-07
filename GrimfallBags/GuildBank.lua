@@ -129,7 +129,7 @@ local function Build()
         end)
         btn:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip.updateTooltip = nil
+            GameTooltip.updateTooltip = 0
             local ok = Guard("GBItemTooltip", function()
                 if atGuildBank then
                     GameTooltip:SetGuildBankItem(currentTab, self.slot)

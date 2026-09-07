@@ -2,7 +2,7 @@
 ## Title: Grimfall Bags
 ## Notes: Bags/Bank/Guild Bank in category or single-list view | WoW 3.3.5a / Grimfall
 ## Author: Beebsis
-## Version: 1.2.6
+## Version: 1.2.7
 ## RequiredDeps: Syndicator335
 ## SavedVariables: GrimfallBagsConfig
 
