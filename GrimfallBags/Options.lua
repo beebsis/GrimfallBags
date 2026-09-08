@@ -82,6 +82,9 @@ local function BuildGeneralTab(c)
     Place(MakeCheck(c, "Show item level on equipment",
         function() return cfg.showILvl end,
         function(v) cfg.showILvl = v end))
+    Place(MakeCheck(c, "Merge stacks (combine partial stacks of an item for display)",
+        function() return cfg.mergeStacks end,
+        function(v) cfg.mergeStacks = v end))
     Place(MakeCheck(c, "Guild bank in category view",
         function() return cfg.gbCategoryView end,
         function(v) cfg.gbCategoryView = v end))
@@ -119,6 +122,9 @@ local function BuildGeneralTab(c)
     Place(MakeCheck(c, "Auto-repair at merchants (prefers guild funds)",
         function() return cfg.autoRepair end,
         function(v) cfg.autoRepair = v end))
+    Place(MakeCheck(c, "Auto-sell Junk category items at merchants",
+        function() return cfg.autoSellJunk end,
+        function(v) cfg.autoSellJunk = v end))
     Place(MakeCheck(c, "Match ElvUI's look (requires ElvUI, /reload)",
         function() return cfg.elvuiSkin end,
         function(v) cfg.elvuiSkin = v end), 40)

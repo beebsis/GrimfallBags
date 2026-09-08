@@ -128,17 +128,24 @@ local function Build()
             if atGuildBank then PickupGuildBankItem(currentTab, self.slot) end
         end)
         btn:SetScript("OnEnter", function(self)
+            -- ANCHOR_NONE specifically makes GameTooltip's own OnShow re-anchor us
+            -- via GameTooltip_SetDefaultAnchor after the fact (see Views.lua item
+            -- button OnEnter). ANCHOR_RIGHT avoids that; AnchorItemTooltip below
+            -- still sets the real position unconditionally.
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip.updateTooltip = 0
             local ok = Guard("GBItemTooltip", function()
                 if atGuildBank then
                     GameTooltip:SetGuildBankItem(currentTab, self.slot)
                 elseif self.link then
                     GameTooltip:SetHyperlink(self.link)
                 end
-                GameTooltip:Show()
             end)
-            if not ok then GameTooltip:Hide() end
+            if not ok or GameTooltip:NumLines() == 0 then
+                GameTooltip:Hide()
+                return
+            end
+            B.AnchorItemTooltip(self)
+            GameTooltip:Show()
         end)
         btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
         buttons[i] = btn
@@ -357,6 +364,13 @@ function B.RefreshGuildBank()
         else
             frame.depositBtn:Hide()
             frame.withdrawBtn:Hide()
+        end
+
+        -- Rapid refreshes can outpace the engine's own tooltip recheck; re-sync explicitly instead.
+        local owner = GameTooltip:IsShown() and GameTooltip:GetOwner()
+        if owner and owner.slot then
+            local onEnter = owner:GetScript("OnEnter")
+            if onEnter then onEnter(owner) end
         end
     end)
 end

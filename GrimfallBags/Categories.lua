@@ -125,6 +125,21 @@ function B.SeedBiSCategory()
     B.Log("BiS category seeded (sell-protected)")
 end
 
+-- Matches on quality alone (the "junk" search keyword means quality == 0), not
+-- item type, so a grey weapon/armor/whatever all land here instead of under
+-- their type category. Inserted at the front so it wins over the type-tag
+-- rules; "sortLast" keeps it displayed at the bottom regardless of that.
+function B.SeedJunkCategory()
+    local cfg = B.Config()
+    if cfg.junkSeeded then return end
+    cfg.junkSeeded = true
+    for _, r in ipairs(cfg.rules) do
+        if r.name == "Junk" then return end
+    end
+    table.insert(cfg.rules, 1, {name = "Junk", query = "junk", sortLast = true})
+    B.Log("Junk category seeded (sorts last)")
+end
+
 local function RuleHasTag(rule, tag)
     for _, t in ipairs(rule.tags or {}) do
         if t == tag then return true end
@@ -220,6 +235,7 @@ function B.RulesToArray()
         end
         if r.section and r.section ~= "" then obj.section = r.section end
         if r.protected then obj.protected = true end
+        if r.sortLast then obj.sortLast = true end
         arr[#arr+1] = obj
     end
     return arr
@@ -286,6 +302,7 @@ function B.ImportRulesArray(arr)
                 items = items,
                 section = obj.section,
                 protected = obj.protected or nil,
+                sortLast = obj.sortLast or nil,
             }
             count = count + 1
         end
@@ -491,6 +508,7 @@ local function LoadEditPane()
         d.idBox:SetText(table.concat(ids, ", "))
         d.hiddenCB:SetChecked(B.Config().hiddenCats[r.name] and true or false)
         d.protectedCB:SetChecked(r.protected == true)
+        d.sortLastCB:SetChecked(r.sortLast == true)
         d.saveBtn:SetText(SAVE or "Save")
         d.delBtn:Show()
         local n = 0
@@ -510,6 +528,7 @@ local function LoadEditPane()
         d.idBox:SetText("")
         d.hiddenCB:SetChecked(false)
         d.protectedCB:SetChecked(false)
+        d.sortLastCB:SetChecked(false)
         d.saveBtn:SetText(ADD or "Add")
         d.delBtn:Hide()
         d.pinText:SetText("")
@@ -784,9 +803,21 @@ function B.BuildCategoriesPanel(parent)
     d.protectedCB:SetHitRectInsets(0, -(plbl:GetStringWidth() + 8), 0, 0)
     B.SkinCheck(d.protectedCB)
 
+    d.sortLastCB = Track(CreateFrame("CheckButton", nil, d))
+    d.sortLastCB:SetWidth(20); d.sortLastCB:SetHeight(20)
+    d.sortLastCB:SetNormalTexture("Interface\\Buttons\\UI-CheckBox-Up")
+    d.sortLastCB:SetCheckedTexture("Interface\\Buttons\\UI-CheckBox-Check")
+    d.sortLastCB:SetHighlightTexture("Interface\\Buttons\\UI-CheckBox-Highlight", "ADD")
+    d.sortLastCB:SetPoint("TOPLEFT", d, "TOPLEFT", paneX, listTop - 276)
+    local slbl = Track(d.sortLastCB:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"))
+    slbl:SetPoint("LEFT", d.sortLastCB, "RIGHT", 4, 0)
+    slbl:SetText("Sort last (always show this category at the bottom)")
+    d.sortLastCB:SetHitRectInsets(0, -(slbl:GetStringWidth() + 8), 0, 0)
+    B.SkinCheck(d.sortLastCB)
+
     local drop = Track(CreateFrame("Button", nil, d))
     drop:SetWidth(280); drop:SetHeight(26)
-    drop:SetPoint("TOPLEFT", d, "TOPLEFT", paneX, listTop - 276)
+    drop:SetPoint("TOPLEFT", d, "TOPLEFT", paneX, listTop - 302)
     drop:SetBackdrop(B.PANEL_BD)
     drop:SetBackdropColor(0.1, 0.2, 0.1, 0.8)
     drop:SetBackdropBorderColor(0.3, 0.6, 0.3, 1)
@@ -830,7 +861,7 @@ function B.BuildCategoriesPanel(parent)
 
     local newBtn = CreateFrame("Button", nil, d, "UIPanelButtonTemplate")
     newBtn:SetWidth(70); newBtn:SetHeight(20)
-    newBtn:SetPoint("TOPLEFT", d, "TOPLEFT", paneX, listTop - 324)
+    newBtn:SetPoint("TOPLEFT", d, "TOPLEFT", paneX, listTop - 350)
     newBtn:SetText(NEW or "Neu")
     newBtn:SetScript("OnClick", function()
         editIdx = nil
@@ -895,6 +926,7 @@ function B.BuildCategoriesPanel(parent)
         local sec  = d.secBox:GetText()
         rule.section = (sec ~= "" and sec or nil)
         rule.protected = d.protectedCB:GetChecked() and true or nil
+        rule.sortLast = d.sortLastCB:GetChecked() and true or nil
 
         local ids = {}
         for numStr in d.idBox:GetText():gmatch("[^,]+") do
