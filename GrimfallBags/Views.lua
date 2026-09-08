@@ -2,6 +2,37 @@ local B = GrimfallBags
 local S = Syndicator335
 local Log, Guard = B.Log, B.Guard
 
+-- Anchors GameTooltip to owner's upper-left, with the on-screen-safe offset
+-- computed here rather than via SetClampedToScreen (whose correction lands a
+-- frame late). Something outside our control -- proven by direct testing to
+-- not be our own code, not SetClampedToScreen, and not ElvUI's tooltip hook --
+-- keeps re-anchoring GameTooltip from a different corner after this runs, on
+-- both "ANCHOR_NONE" and "ANCHOR_RIGHT". Rather than keep chasing what that is,
+-- a persistent OnUpdate hook below re-asserts this exact position every single
+-- frame while it's showing for one of our buttons, so whatever else touches it
+-- never gets the last word by the time a frame actually renders.
+local currentAnchorOwner, currentAnchorX, currentAnchorY
+
+local function AnchorItemTooltip(owner)
+    local tipW, tipH = GameTooltip:GetWidth() or 0, GameTooltip:GetHeight() or 0
+    local left, top = owner:GetLeft() or 0, owner:GetTop() or 0
+    local xOfs, yOfs = 0, 0
+    if left - tipW < 0 then xOfs = tipW - left end
+    if top - tipH < 0 then yOfs = tipH - top end
+    currentAnchorOwner, currentAnchorX, currentAnchorY = owner, xOfs, yOfs
+    GameTooltip:SetClampedToScreen(false)
+    GameTooltip:ClearAllPoints()
+    GameTooltip:SetPoint("TOPRIGHT", owner, "TOPLEFT", xOfs, yOfs)
+end
+B.AnchorItemTooltip = AnchorItemTooltip
+
+GameTooltip:HookScript("OnUpdate", function(self)
+    if currentAnchorOwner and self:IsShown() and self:GetOwner() == currentAnchorOwner then
+        self:ClearAllPoints()
+        self:SetPoint("TOPRIGHT", currentAnchorOwner, "TOPLEFT", currentAnchorX, currentAnchorY)
+    end
+end)
+
 local COLS, BTN = 12, 37
 local BTN_PAD   = 2
 local PAD       = 10
@@ -63,6 +94,12 @@ local function IsRecent(id)
     return exp and exp > time()
 end
 
+-- "Recent" only tracks backpack counts; a bank copy of the same item ID
+-- would otherwise get flagged "New" just from moving it between bag/bank.
+local function IsRecentInBag(id, bag)
+    return bag >= 0 and bag <= 4 and IsRecent(id)
+end
+
 local function ExpireRecent()
     local now, changed = time(), false
     for id, exp in pairs(recentItems) do
@@ -116,8 +153,15 @@ local function AcquireButton(view, bag)
     view.nBtn = view.nBtn + 1
     local btn = view.buttons[view.nBtn]
     if not btn then
-        btn = CreateFrame("Button", view.f:GetName().."Item"..view.nBtn,
-                          view.bagParents[bag], "ContainerFrameItemButtonTemplate")
+        local name = view.f:GetName().."Item"..view.nBtn
+        if bag == -1 then
+            local ok, created = pcall(CreateFrame, "Button", name,
+                                       view.bagParents[bag], "BankItemButtonGenericTemplate")
+            if ok and created then btn = created end
+        end
+        if not btn then
+            btn = CreateFrame("Button", name, view.bagParents[bag], "ContainerFrameItemButtonTemplate")
+        end
         btn:SetWidth(BTN); btn:SetHeight(BTN)
         local ilvl = btn:CreateFontString(nil, "OVERLAY", "NumberFontNormalSmall")
         ilvl:SetPoint("TOPLEFT", btn, "TOPLEFT", 2, -2)
@@ -130,10 +174,24 @@ local function AcquireButton(view, bag)
                 return
             end
             self.tooltipLink = self.link
+            -- GetAnchorType() keeps reporting whatever was passed to SetOwner even
+            -- after we call SetPoint ourselves below. "ANCHOR_NONE" specifically is
+            -- treated by GameTooltip's own OnShow as "no real anchor was set", so it
+            -- calls GameTooltip_SetDefaultAnchor as a safety net and silently
+            -- re-anchors us from a different corner after the fact -- this is what
+            -- caused the flicker, not our own positioning. Use ANCHOR_RIGHT here
+            -- purely so GetAnchorType() never reports ANCHOR_NONE; AnchorItemTooltip
+            -- overrides the actual position unconditionally right after.
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip.updateTooltip = 0
-            -- SetBagItem(-1, slot) never works here and still leaves the tooltip auto-hiding after; skip it for the main bank container.
-            if self.bag ~= -1 then
+            -- SetBagItem(-1, slot) never works here; Blizzard's own bank frame
+            -- uses BankButtonIDToInvSlotID + SetInventoryItem for these slots
+            -- instead of the generic container API, so mirror that.
+            if self.bag == -1 then
+                Guard("BankSlotTooltip", function()
+                    local invSlot = BankButtonIDToInvSlotID(self:GetID(), false)
+                    GameTooltip:SetInventoryItem("player", invSlot)
+                end)
+            else
                 Guard("BagItemTooltip", function()
                     GameTooltip:SetBagItem(self.bag, self:GetID())
                 end)
@@ -144,8 +202,13 @@ local function AcquireButton(view, bag)
                         GameTooltip:SetHyperlink(self.link)
                     end)
                 end
-                if GameTooltip:NumLines() == 0 then GameTooltip:Hide() end
+                if GameTooltip:NumLines() == 0 then
+                    GameTooltip:Hide()
+                    return
+                end
             end
+            AnchorItemTooltip(self)
+            GameTooltip:Show()
         end)
         btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
         view.buttons[view.nBtn] = btn
@@ -168,6 +231,7 @@ local function AcquireOfflineButton(view)
             if self.link then
                 GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
                 GameTooltip:SetHyperlink(self.link)
+                AnchorItemTooltip(self)
                 GameTooltip:Show()
             end
         end)
@@ -366,17 +430,29 @@ local function ApplyILvl(btn, link, quality)
     btn.ilvl:Hide()
 end
 
-local function FillLiveButton(btn, bag, slot, query)
+local function FillLiveButton(btn, bag, slot, query, countOverride)
     btn:SetID(slot)
     local texture, count, locked, quality = GetContainerItemInfo(bag, slot)
     local link = GetContainerItemLink(bag, slot)
+    if link ~= GetContainerItemLink(bag, slot) then
+        -- Slot changed between the two reads above; re-fetch once for a consistent snapshot.
+        texture, count, locked, quality = GetContainerItemInfo(bag, slot)
+        link = GetContainerItemLink(bag, slot)
+    end
     btn.link = link
+    -- countOverride is the combined total across merged stacks (see RefreshImpl);
+    -- everything else here (texture/border/lock/cooldown) still reflects this
+    -- specific slot, only the displayed/searched count changes.
+    count = countOverride or count
 
-    SetItemButtonTexture(btn, texture)
+    -- Derive the icon from the link itself rather than the separately
+    -- fetched texture above; the two calls can race during rapid bag/bank
+    -- changes, pairing one item's icon with a different item's data.
+    SetItemButtonTexture(btn, (link and GetItemIcon(link)) or texture)
     SetItemButtonCount(btn, count)
     SetItemButtonDesaturated(btn, locked or (B.Config().greyJunk and quality == 0))
 
-    ApplyBorder(btn, quality, IsRecent(S.ItemID(link)))
+    ApplyBorder(btn, quality, IsRecentInBag(S.ItemID(link), bag))
     ApplyILvl(btn, link, quality)
     ApplyTmogDot(btn, link)
 
@@ -387,7 +463,7 @@ local function FillLiveButton(btn, bag, slot, query)
 
     if query and query ~= "" then
         btn:SetAlpha(link and S.Search.Matches(
-            {l=link, c=count, q=quality, isNew=IsRecent(S.ItemID(link))}, query) and 1 or 0.25)
+            {l=link, c=count, q=quality, isNew=IsRecentInBag(S.ItemID(link), bag)}, query) and 1 or 0.25)
     else
         btn:SetAlpha(1)
     end
@@ -425,11 +501,7 @@ local function RefreshImpl(view)
     SyncLayoutConstants(view)
     local cfg = B.Config()
 
-    -- Skip hiding whatever button GameTooltip is anchored to, so a refresh doesn't invalidate its owner.
-    local keepBtn = GameTooltip:IsShown() and GameTooltip:GetOwner()
-    for i = 1, view.nBtn do
-        if view.buttons[i] ~= keepBtn then view.buttons[i]:Hide() end
-    end
+    for i = 1, view.nBtn  do view.buttons[i]:Hide()  end
     for i = 1, view.nOBtn do view.obuttons[i]:Hide() end
     for i = 1, view.nHdr  do view.headers[i]:Hide()  end
     for i = 1, view.nSHdr do view.sheaders[i]:Hide() end
@@ -496,7 +568,7 @@ local function RefreshImpl(view)
                     local _, count, _, quality = GetContainerItemInfo(bag, slot)
                     local entry = {l=link, c=count, q=quality}
                     local cat
-                    if IsRecent(S.ItemID(link)) then
+                    if IsRecentInBag(S.ItemID(link), bag) then
                         cat = B.RECENT_LABEL
                     else
                         cat = B.Categorize(entry)
@@ -504,7 +576,7 @@ local function RefreshImpl(view)
                     if not B.IsCategoryHidden(cat) then
                         if not groups[cat] then groups[cat] = {}; order[#order+1] = cat end
                         groups[cat][#groups[cat]+1] = {
-                            bag=bag, slot=slot, l=link, q=quality or 0,
+                            bag=bag, slot=slot, l=link, c=count or 1, q=quality or 0,
                             sortName=S.ItemName(link):lower(),
                         }
                     end
@@ -515,6 +587,43 @@ local function RefreshImpl(view)
         end
     end
     view.freeText:SetText(freeSlots.."/"..totalSlots)
+
+    -- Visually combine multiple partial stacks of the same stackable item into
+    -- one displayed entry (the largest physical stack becomes the interactive
+    -- target; the others are untouched in the actual bags/bank). Only applies
+    -- to category view -- single-list mirrors Blizzard's fixed slot layout, so
+    -- there's no natural single tile to merge multiple physical slots into.
+    if cfg.mergeStacks and not singleList then
+        for cat, list in pairs(groups) do
+            local buckets, idOrder, out = {}, {}, {}
+            for _, it in ipairs(list) do
+                local id = not it.isEmpty and S.ItemID(it.l)
+                local maxStack = id and select(8, GetItemInfo(it.l))
+                if id and maxStack and maxStack > 1 then
+                    local b = buckets[id]
+                    if not b then
+                        b = {}
+                        buckets[id] = b
+                        idOrder[#idOrder+1] = id
+                    end
+                    b[#b+1] = it
+                else
+                    out[#out+1] = it
+                end
+            end
+            for _, id in ipairs(idOrder) do
+                local b = buckets[id]
+                local total = 0
+                for _, it in ipairs(b) do total = total + (it.c or 0) end
+                table.sort(b, function(a, bb) return (a.c or 0) > (bb.c or 0) end)
+                local rep = b[1]
+                rep.mergedCount = total
+                rep.c = total -- FillOfflineButton reads .c directly (no countOverride param there)
+                out[#out+1] = rep
+            end
+            groups[cat] = out
+        end
+    end
 
     if singleList then
         local col = 0
@@ -536,6 +645,9 @@ local function RefreshImpl(view)
                 local ka, kb = B.SortKey(a.l), B.SortKey(b.l)
                 if ka ~= kb then return ka < kb end
                 if a.sortName ~= b.sortName then return a.sortName < b.sortName end
+                -- Deterministic tiebreaker so identical-item stacks (a real tie) don't reshuffle each other.
+                if a.bag ~= b.bag then return (a.bag or 0) < (b.bag or 0) end
+                if a.slot ~= b.slot then return (a.slot or 0) < (b.slot or 0) end
                 return false
             end)
         end
@@ -577,38 +689,55 @@ local function RefreshImpl(view)
         local present, usedCat, usedSection = {}, {}, {}
         for _, c in ipairs(order) do present[c] = true end
 
+        -- Categories flagged "sort last" (e.g. Junk) are excluded from the normal
+        -- rule-order/section placement below and appended at the very end instead,
+        -- regardless of where their rule sits in the list (that position still
+        -- controls match priority via B.Categorize, just not display order).
+        local sortLastByName = {}
+        for _, r in ipairs(cfgRules) do
+            if r.sortLast then sortLastByName[r.name] = true end
+        end
+
         local seq = {}
         if present[B.RECENT_LABEL] then
             seq[#seq+1] = {cat = B.RECENT_LABEL}
             usedCat[B.RECENT_LABEL] = true
         end
         for _, r in ipairs(cfgRules) do
-            if r.section and r.section ~= "" then
-                if not usedSection[r.section] then
-                    usedSection[r.section] = true
-                    local cats = {}
-                    for _, r2 in ipairs(cfgRules) do
-                        if r2.section == r.section and present[r2.name]
-                           and not usedCat[r2.name] then
-                            cats[#cats+1] = r2.name
-                            usedCat[r2.name] = true
+            if not sortLastByName[r.name] then
+                if r.section and r.section ~= "" then
+                    if not usedSection[r.section] then
+                        usedSection[r.section] = true
+                        local cats = {}
+                        for _, r2 in ipairs(cfgRules) do
+                            if r2.section == r.section and present[r2.name]
+                               and not usedCat[r2.name] and not sortLastByName[r2.name] then
+                                cats[#cats+1] = r2.name
+                                usedCat[r2.name] = true
+                            end
+                        end
+                        if #cats > 0 then
+                            seq[#seq+1] = {section = r.section, cats = cats}
                         end
                     end
-                    if #cats > 0 then
-                        seq[#seq+1] = {section = r.section, cats = cats}
-                    end
+                elseif present[r.name] and not usedCat[r.name] then
+                    seq[#seq+1] = {cat = r.name}
+                    usedCat[r.name] = true
                 end
-            elseif present[r.name] and not usedCat[r.name] then
-                seq[#seq+1] = {cat = r.name}
-                usedCat[r.name] = true
             end
         end
         local rest = {}
         for _, c in ipairs(order) do
-            if not usedCat[c] and c ~= EMPTY_LABEL then rest[#rest+1] = c end
+            if not usedCat[c] and c ~= EMPTY_LABEL and not sortLastByName[c] then rest[#rest+1] = c end
         end
         table.sort(rest)
         for _, c in ipairs(rest) do seq[#seq+1] = {cat = c} end
+        for _, r in ipairs(cfgRules) do
+            if sortLastByName[r.name] and present[r.name] and not usedCat[r.name] then
+                seq[#seq+1] = {cat = r.name}
+                usedCat[r.name] = true
+            end
+        end
         if present[EMPTY_LABEL] then seq[#seq+1] = {cat = EMPTY_LABEL} end
 
         local availWidth  = view.f:GetWidth() - PAD * 2
@@ -626,7 +755,7 @@ local function RefreshImpl(view)
                 FillOfflineButton(btn, it, query)
             else
                 btn = AcquireButton(view, it.bag)
-                FillLiveButton(btn, it.bag, it.slot, it.isEmpty and "" or query)
+                FillLiveButton(btn, it.bag, it.slot, it.isEmpty and "" or query, it.mergedCount)
                 if it.isEmpty then
                     local cnt = _G[btn:GetName().."Count"]
                     if cnt then cnt:SetText(it.free); cnt:Show() end
@@ -1341,6 +1470,8 @@ evt:RegisterEvent("BANKFRAME_CLOSED")
 evt:RegisterEvent("CURRENCY_DISPLAY_UPDATE")
 
 local dirty = false
+local dirtyDebounce = 0
+local DIRTY_DEBOUNCE_TIME = 0.2
 local expireTick = 0
 local resizeTick = 0
 evt:SetScript("OnUpdate", function(self, elapsed)
@@ -1348,14 +1479,18 @@ evt:SetScript("OnUpdate", function(self, elapsed)
     expireTick = expireTick + (elapsed or 0)
     if expireTick > 5 then
         expireTick = 0
-        if ExpireRecent() then dirty = true end
+        if ExpireRecent() then dirty = true; dirtyDebounce = 0 end
     end
     if dirty then
-        dirty = false
-        Guard("UpdateRecent", UpdateRecent)
-        B.WipeTmogCache()
-        Refresh(bagView)
-        Refresh(bankView)
+        dirtyDebounce = dirtyDebounce + (elapsed or 0)
+        if dirtyDebounce >= DIRTY_DEBOUNCE_TIME then
+            dirty = false
+            dirtyDebounce = 0
+            Guard("UpdateRecent", UpdateRecent)
+            B.WipeTmogCache()
+            Refresh(bagView)
+            Refresh(bankView)
+        end
     end
 
     if bagView.resizeDirty or bankView.resizeDirty then
@@ -1414,6 +1549,7 @@ evt:SetScript("OnEvent", function(self, event)
 
             B.SeedDefaultCategories()
             B.SeedBiSCategory()
+            B.SeedJunkCategory()
 
             B.InitTmogAPI()
         end)
@@ -1426,6 +1562,7 @@ evt:SetScript("OnEvent", function(self, event)
     elseif event == "BAG_UPDATE" or event == "ITEM_LOCK_CHANGED"
         or event == "BAG_UPDATE_COOLDOWN" or event == "PLAYERBANKSLOTS_CHANGED" then
         dirty = true
+        dirtyDebounce = 0
 
     elseif event == "CURRENCY_DISPLAY_UPDATE" then
         Guard("RefreshCurrency", RefreshCurrencyRow, bagView)

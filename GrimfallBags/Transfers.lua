@@ -216,6 +216,12 @@ evt:SetScript("OnEvent", function(self, event)
         atMerchant = true
         if B.Config().autoOpenMerchant then B.OpenBags() end
         if B.Config().autoRepair then B.Guard("AutoRepair", DoAutoRepair) end
+        if B.Config().autoSellJunk then
+            B.Guard("AutoSellJunk", function()
+                StartJob({mode = "vendor", srcBags = B.PLAYER_BAGS,
+                          query = "", junkOnly = true, startMoney = GetMoney()})
+            end)
+        end
     elseif event == "MERCHANT_CLOSED" then
         atMerchant = false
         runner:Hide()

@@ -1,7 +1,7 @@
 local B = {}
 _G["GrimfallBags"] = B
 
-B.VERSION = "1.2.7"
+B.VERSION = "1.3.0"
 
 local LOG_MAX = 200
 B.log = {}
@@ -30,6 +30,7 @@ local DEFAULTS = {
     showSearchFilters = true,
     greyJunk     = true,
     showILvl     = true,
+    mergeStacks  = true,
     recentSecs   = 120,
     sortMethod   = "type",
     replaceBags  = true,
@@ -42,6 +43,7 @@ local DEFAULTS = {
     autoOpenMerchant = false,
     autoOpenMailbox  = false,
     autoRepair       = false,
+    autoSellJunk     = false,
     elvuiPromptShown = false,
     elvuiBagsMigrationPrompted = false,
     elvuiSkin        = true,
