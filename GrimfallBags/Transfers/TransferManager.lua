@@ -1,10 +1,3 @@
--- GrimfallBags
--- Transfers/TransferManager.lua
---
--- Guild-bank money deposit/withdraw UI. Registers the two Blizzard static popups
--- and exposes ShowDeposit()/ShowWithdraw() so the view can trigger them from its
--- deposit/withdraw buttons. Actual money movement goes through B.GuildBankAPI.
-
 local B = GrimfallBags
 
 B.TransferManager = {}

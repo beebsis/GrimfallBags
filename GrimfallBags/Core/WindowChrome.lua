@@ -2,9 +2,6 @@ local B = GrimfallBags
 
 B.ASSETS = "Interface\\AddOns\\GrimfallBags\\Assets\\"
 
--- Flat, dark theme palette matching EllesmereUI (values lifted from
--- EllesmereUI/EllesmereUI.lua "Visual Settings"): blue-black panels, a white
--- translucent 1px border, and the #0CD29D teal accent. Stock textures only.
 B.COLOR_BG      = { 0.05, 0.07, 0.09, 0.96 }
 B.COLOR_PANEL   = { 0.075, 0.113, 0.141, 1 }
 B.COLOR_BORDER  = { 1, 1, 1, 0.05 }
@@ -28,8 +25,6 @@ function B.StyleWindow(f)
     f:SetBackdropBorderColor(unpack(B.COLOR_BORDER))
 end
 
--- Flat inner panel: slightly lighter than the window, or a deeper inset when
--- `inset` is true. Used for list boxes, dropdowns, and other nested surfaces.
 function B.StylePanel(f, inset)
     f:SetBackdrop(B.PANEL_BD)
     if inset then

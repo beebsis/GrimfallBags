@@ -18,7 +18,6 @@ function B.GetItemTags(link)
 end
 
 local function ShowItemTooltipInfo(tt, link)
-    -- Always-on info: item ID and the item's GrimfallBags category tags.
     local shown = false
     local id = S.ItemID(link)
     if id then
@@ -128,17 +127,11 @@ function B.SeedBiSCategory()
     B.Log("BiS category seeded (sell-protected)")
 end
 
--- Junk matches on quality alone (the "junk" search keyword means quality == 0),
--- so grey items always land here instead of their type category. It is pinned
--- to the bottom ("sortLast") and treated as locked: grey items must always go
--- to Junk, never to a type category like "Miscellaneous".
 function B.SeedJunkCategory()
     local cfg = B.Config()
     for _, r in ipairs(cfg.rules) do
         if r.name == "Junk" then
             cfg.junkSeeded = true
-            -- Self-heal: keep Junk pinned to the bottom across older saves that
-            -- may have dropped the flag.
             if not r.sortLast then
                 r.sortLast = true
                 B.Log("Junk category pinned to bottom")
@@ -146,21 +139,12 @@ function B.SeedJunkCategory()
             return
         end
     end
-    -- Self-heal: restore a missing Junk rule even when the legacy one-shot
-    -- "junkSeeded" flag already fired - the rule can be lost by config imports,
-    -- partial saves, or older bugs, and then never comes back. Only an explicit
-    -- delete through the editor (sets cfg.noJunk) keeps it gone on purpose.
     if cfg.noJunk then return end
     cfg.junkSeeded = true
     table.insert(cfg.rules, 1, {name = "Junk", query = "junk", sortLast = true})
     B.Log("Junk category seeded (sorts last)")
 end
 
--- Tags that cannot come from an item's type/subtype/equip-slot but live in its
--- tooltip text instead (e.g. Grimfall's "Heroic x/5" line). A rule using one of
--- these as a tag is matched against the tooltip text, same as a plain search
--- term, so a category like {name="Heroic", tags={"heroic"}, query="heroic"}
--- actually catches those items.
 local TOOLTIP_TAGS = {
     heroic = true,
     heroisch = true,
@@ -202,9 +186,6 @@ function B.Categorize(entry)
         end
     end
 
-    -- Junk always wins over the tag/query rules: a grey (quality 0) item must
-    -- land in Junk no matter where the Junk rule sits in the list, so it can
-    -- never fall through to a type category like "Miscellaneous".
     if not cfg.noJunk and entry and entry.l then
         local q = entry.q
         if q == nil or q < 0 then
@@ -227,8 +208,6 @@ function B.Categorize(entry)
                     for _, it in ipairs(itemTags) do
                         if it == tag then matched = true; break end
                     end
-                    -- Tooltip-only pseudo-tag (e.g. "heroic"): fall back to the
-                    -- tooltip text when the item-type tags don't carry it.
                     if not matched and TOOLTIP_TAGS[tag] and S.Search.Matches(entry, tag) then
                         matched = true
                     end
@@ -260,9 +239,6 @@ function B.IsItemSellProtected(link)
     return B.IsCategoryProtected(B.Categorize({l = link}))
 end
 
--- /gfbags junk - dumps what the junk machinery sees right now: the Junk rule
--- state and, for every poor (quality 0) item in the backpack, where it actually
--- got categorized (and why it may be missing from the Junk group).
 function B.DebugJunk()
     local cfg = B.Config()
     local junkRule, junkIdx
@@ -545,7 +521,6 @@ local function MoveRule(idx, delta)
     local rules = B.Config().rules
     local target = idx + delta
     if not (rules[idx] and rules[target]) then return end
-    -- Junk is locked: never reorder it, and never swap another rule past it.
     if rules[idx].name == "Junk" or rules[target].name == "Junk" then return end
     rules[idx], rules[target] = rules[target], rules[idx]
     if editIdx == idx then editIdx = target
@@ -738,7 +713,7 @@ function B.BuildCategoriesPanel(parent)
         row:SetScript("OnDragStart", function(self)
             if self.idx then
                 local r = B.Config().rules[self.idx]
-                if r and r.name == "Junk" then return end  -- Junk is locked
+                if r and r.name == "Junk" then return end
                 draggingIdx = self.idx
                 ShowDragGhost(r and r.name)
             end
@@ -993,7 +968,6 @@ function B.BuildCategoriesPanel(parent)
         if editIdx and rules[editIdx] then
             rule = rules[editIdx]
             if rule.name == "Junk" and name ~= "Junk" then
-                -- Junk is locked: its name can't be changed.
                 name = "Junk"
                 d.nameBox:SetText("Junk")
             end
@@ -1065,8 +1039,6 @@ function B.BuildCategoriesPanel(parent)
             return
         end
         if editIdx and B.Config().rules[editIdx] then
-            -- Deleting the seeded Junk category on purpose: remember it so
-            -- SeedJunkCategory doesn't resurrect it on the next login.
             if B.Config().rules[editIdx].name == "Junk" then
                 B.Config().noJunk = true
             end

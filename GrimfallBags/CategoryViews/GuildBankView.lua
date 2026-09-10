@@ -1,10 +1,3 @@
--- GrimfallBags
--- CategoryViews/GuildBankView.lua
---
--- Guild-bank window logic. The static frame/templates come from
--- CategoryViews/GuildBankView.xml; this file instantiates the tab/item buttons,
--- wires their scripts, and drives refresh/toggle/query/sort from the XML layout.
-
 local B = GrimfallBags
 local S = Syndicator335
 local Log, Guard = B.Log, B.Guard
@@ -23,8 +16,6 @@ local atGuildBank = false
 local gbResizeDirty = false
 local initialized = false
 
--- Top of the search-box row (just below the tab-button row); the item grid
--- starts below this plus the search/filter chrome when that is shown.
 local SEARCH_ROW_Y = -(PAD + 18 + 36 + 4)
 
 B.GuildBankView.IsOpen = function() return atGuildBank end
@@ -35,7 +26,6 @@ local function Initialize()
     if not frame then return end
     initialized = true
 
-    -- Window behavior + skinning (static layout lives in the XML).
     B.MakeMovable(frame, "GrimfallBagsGuildBank")
     B.MakeResizable(frame, "GrimfallBagsGuildBank", PAD * 2 + 4 * (BTN + BTN_PAD), function()
         gbResizeDirty = true
@@ -44,7 +34,6 @@ local function Initialize()
     B.StyleWindow(frame)
     tinsert(UISpecialFrames, "GrimfallBagsGuildBank")
 
-    -- Static child references.
     frame.title = _G["GrimfallBagsGuildBankTitle"]
     frame.moneyText = _G["GrimfallBagsGuildBankMoney"]
     frame.depositBtn = _G["GrimfallBagsGuildBankDepositBtn"]
@@ -59,7 +48,6 @@ local function Initialize()
     B.SkinButton(frame.depositBtn)
     B.SkinButton(frame.withdrawBtn)
 
-    -- View toggle button.
     local viewBtn = _G["GrimfallBagsGuildBankViewBtn"]
     B.SkinButton(viewBtn)
     viewBtn:SetScript("OnClick", function()
@@ -74,7 +62,6 @@ local function Initialize()
     end)
     viewBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    -- Sort button.
     local sortBtn = frame.sortBtn
     sortBtn.icon = _G["GrimfallBagsGuildBankSortBtnIcon"]
     B.SkinButton(sortBtn)
@@ -88,11 +75,9 @@ local function Initialize()
     end)
     sortBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    -- Deposit / withdraw money (UI lives in Transfers/TransferManager.lua).
     frame.depositBtn:SetScript("OnClick", function() B.TransferManager.ShowDeposit() end)
     frame.withdrawBtn:SetScript("OnClick", function() B.TransferManager.ShowWithdraw() end)
 
-    -- Header pool for category view.
     frame.headers = {}
     frame.nHdr = 0
     function frame.AcquireHeader()
@@ -107,7 +92,6 @@ local function Initialize()
         return h
     end
 
-    -- Tab buttons (from GrimfallBagsGBTabButtonTemplate).
     frame.tabBtns = {}
     for t = 1, 6 do
         local tb = CreateFrame("Button", "GrimfallBagsGBTab"..t, frame, "GrimfallBagsGBTabButtonTemplate")
@@ -136,7 +120,6 @@ local function Initialize()
         frame.tabBtns[t] = tb
     end
 
-    -- Item buttons (from GrimfallBagsGBItemButtonTemplate).
     local gridTop = SEARCH_ROW_Y - B.SearchChromeExtra()
     for i = 1, B.GuildBankAPI.NUM_SLOTS do
         local btn = CreateFrame("Button", "GrimfallBagsGBItem"..i, frame, "GrimfallBagsGBItemButtonTemplate")
@@ -151,7 +134,16 @@ local function Initialize()
         btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         btn:RegisterForDrag("LeftButton")
         btn:SetScript("OnClick", function(self, mouse)
-            if not atGuildBank then return end
+            if not atGuildBank then
+                -- Cached/remote guild-bank view: clicking cannot do anything
+                -- server-side. Say so once instead of silently ignoring clicks.
+                if not B.gbCachedHintShown then
+                    B.gbCachedHintShown = true
+                    print("|cff33aaff[GrimfallBags]|r Cached guild-bank view - items can't be "
+                          .."used or moved until you're actually at a guild bank.")
+                end
+                return
+            end
             if mouse == "RightButton" then
                 B.GuildBankAPI.AutoStoreItem(currentTab, self.slot)
             else
@@ -165,11 +157,6 @@ local function Initialize()
             if atGuildBank then B.GuildBankAPI.PickupItem(currentTab, self.slot) end
         end)
         btn:SetScript("OnEnter", function(self)
-            -- Something outside our control kept re-anchoring the tooltip from a
-            -- different corner after this ran (see ViewShared.lua's AnchorItemTooltip
-            -- for the full story). ANCHOR_RIGHT avoids one known trigger for that
-            -- (ANCHOR_NONE); AnchorItemTooltip's own per-frame reassertion is what
-            -- actually guarantees the position holds regardless of the cause.
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
             local ok = Guard("GBItemTooltip", function()
                 if atGuildBank then
@@ -189,7 +176,6 @@ local function Initialize()
         buttons[i] = btn
     end
 
-    -- Search box + quick filters (shared with the bag/bank views).
     local searchFilter = B.BuildSearchFilter(frame, frame, function()
         B.GuildBankView.Refresh()
     end, "GrimfallBagsGuildBank", SEARCH_ROW_Y)
@@ -273,8 +259,6 @@ function B.GuildBankView.Refresh()
             else
                 qborder:Hide()
             end
-            -- Search dimming: matches stay full alpha, non-matches dim to
-            -- 0.25 (same convention as the bag/bank views), empty stays empty.
             if e.l and query ~= "" then
                 btn:SetAlpha(S.Search.Matches({l=e.l, c=e.c}, query) and 1 or 0.25)
             else
@@ -384,7 +368,6 @@ function B.GuildBankView.Refresh()
             if atGuildBank then frame.depositItemsBtn:Show() else frame.depositItemsBtn:Hide() end
         end
 
-        -- Rapid refreshes can outpace the engine's own tooltip recheck; re-sync explicitly instead.
         local owner = GameTooltip:IsShown() and GameTooltip:GetOwner()
         if owner and owner.slot then
             local onEnter = owner:GetScript("OnEnter")
@@ -478,10 +461,6 @@ evt:SetScript("OnEvent", function(self, event, arg1)
 
     elseif event == "ADDON_LOADED" and arg1 == "Blizzard_GuildBankUI" then
         if B.Config().replaceGuildBank and GuildBankFrame then
-            -- Hide() would trigger OnHide -> CloseGuildBank? Keep it shown but
-            -- pinned off-screen so Blizzard's column/item buttons can't float
-            -- over (or intercept the mouse over) our guild-bank window. Mirrors
-            -- the bank frame's HideBlizzardBank in BankView.lua.
             local repositioning = false
             local function PushOffscreen(f)
                 if repositioning then return end

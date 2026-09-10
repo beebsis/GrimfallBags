@@ -3,8 +3,6 @@ local Log = B.Log
 
 local function HideBlizzardBank()
     if B.Config().replaceBank and BankFrame then
-        -- Hide() would trigger OnHide -> CloseBankFrame(), ending the bank
-        -- interaction server-side, so keep it shown but pin it off-screen.
         local repositioning = false
         local function PushOffscreen(f)
             if repositioning then return end

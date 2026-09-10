@@ -56,7 +56,6 @@ local function FirstEmptySlot(bags)
     end
 end
 
--- First empty, unlocked slot in guild-bank tab `tab`, or nil.
 local function FirstEmptyGuildSlot(tab)
     for slot = 1, B.GuildBankAPI.NUM_SLOTS do
         if not B.GuildBankAPI.GetItemLink(tab, slot) then
@@ -149,8 +148,6 @@ runner:SetScript("OnUpdate", function(self, elapsed)
     end
 
     local items = MatchingItems(job.srcBags, job.query, job.junkOnly)
-    -- Protected categories/items are never sold OR moved; drop them here so the
-    -- runner can't touch them, and report the pre-counted total on completion.
     if B.IsItemSellProtected then
         for i = #items, 1, -1 do
             if B.IsItemSellProtected(items[i].link) then table.remove(items, i) end
@@ -215,8 +212,6 @@ function B.IsTransferRunning()
     return runner:IsShown()
 end
 
--- Compute the protected-filtered item count for a query and, when confirmed,
--- start the move job. Protected items are never included in the count.
 local function ConfirmBulkMove(data)
     if runner:IsShown() then
         Log("Bulk move skipped - a transfer job is already running")
@@ -266,9 +261,6 @@ function B.WithdrawAll()
                      query = "", mode = "move", label = "from the bank"})
 end
 
--- Guild-bank deposit is deposit-only on purpose: withdrawing from the guild
--- bank is rank/officer sensitive and can fail for low-ranked members, so a
--- matching-withdraw mirror is intentionally not implemented here.
 function B.DepositGuildMatching(query)
     query = (query or ""):lower()
     if query == "" then
@@ -295,8 +287,6 @@ local function StartMoveList(data)
     Log("Category deposit started ("..(data.dest or "?")..")")
 end
 
--- Deposit a category's already-collected items (h.items) to the bank or the
--- current guild bank tab. Confirmation-guarded via GFBAGS_DEPOSIT_CATEGORY.
 function B.DepositCategory(items, catName, dest)
     if not items or #items == 0 then return end
     if runner:IsShown() then
@@ -336,8 +326,6 @@ function B.DoTransfer(view)
         })
     elseif atBank then
         if query == "" then
-            -- Empty search means "everything": route through the confirmed
-            -- bulk action instead of silently moving the whole inventory.
             if isBankView then B.WithdrawAll() else B.DepositAll() end
         elseif isBankView then
             StartJob({mode="move", srcBags=B.BANK_BAGS, dstBags=B.PLAYER_BAGS, query=query})
@@ -419,8 +407,6 @@ function B.UpdateTransferButtons()
         atMerchant and "Sell matching items (empty search = junk only)"
                     or "Deposit matching items into the bank")
 
-    -- Bank-only bulk buttons show/hide with the bank, before the bank view's
-    -- toolbar is re-laid out (so RelayoutFiltersBtn sees their new state).
     if B.bankView then
         for _, key in ipairs({"depositAllBtn", "withdrawAllBtn"}) do
             local b = B.bankView[key]
@@ -442,7 +428,6 @@ evt:RegisterEvent("MAIL_CLOSED")
 evt:SetScript("OnEvent", function(self, event)
     if event == "MERCHANT_SHOW" then
         atMerchant = true
-        -- Always-on: open the bags whenever a merchant or mailbox is used.
         B.OpenBags()
         if B.Config().autoRepair then B.Guard("AutoRepair", DoAutoRepair) end
         if B.Config().autoSellJunk then

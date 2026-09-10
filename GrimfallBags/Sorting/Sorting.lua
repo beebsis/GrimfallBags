@@ -121,8 +121,6 @@ local function SortStep(st, bags)
         return a.id < b.id
     end)
 
-    -- Non-ignored slots, in physical order, are the target positions for the
-    -- sorted items; ignored slots stay put and are never swapped into.
     local targets = {}
     for _, s in ipairs(slots) do
         if not s.ignored then targets[#targets+1] = s end

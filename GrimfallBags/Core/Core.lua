@@ -3,7 +3,6 @@ _G["GrimfallBags"] = B
 
 B.VERSION = "2.0.0"
 
--- Keybinding labels for Bindings.xml (shown in the Key Bindings UI).
 BINDING_HEADER_GRIMFALLBAGS = "Grimfall Bags"
 BINDING_NAME_GFBAGS_TOGGLEBAGS = "Toggle Bags"
 BINDING_NAME_GFBAGS_OPENBANK   = "Open Bank"
@@ -70,7 +69,6 @@ function B.Config()
             if type(v) == "table" then c[k] = {} else c[k] = v end
         end
     end
-    -- Retire the old elvuiSkin boolean in favor of the skin dropdown value.
     if c.elvuiSkin ~= nil then c.elvuiSkin = nil end
     return c
 end
@@ -98,6 +96,11 @@ SlashCmdList["GrimfallBags"] = function(msg)
         wipe(B.log)
         B.errorNotified = nil
         print("|cff33aaff[GrimfallBags]|r Log cleared.")
+    elseif msg == "clickdebug" then
+        B.clickDebug = not B.clickDebug
+        B.Log("clickdebug "..(B.clickDebug and "ON" or "OFF"))
+        print("|cff33aaff[GrimfallBags]|r Item click debug "
+              ..(B.clickDebug and "ON" or "OFF").." - click some bag items, then /gfbags log.")
     elseif msg == "junk" or msg == "junkdebug" then
         if B.DebugJunk then
             B.DebugJunk()

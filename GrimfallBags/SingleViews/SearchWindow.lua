@@ -1,10 +1,6 @@
 local B = GrimfallBags
 local S = Syndicator335
 
--- Cross-character inventory search. Reads only Syndicator's cached character /
--- guild data (no live container queries, no remote movement, no mail/auction
--- automation). Purely read-only: click a row to link the item into chat.
-
 local ROW_H    = 22
 local MAX_ROWS = 20
 
@@ -21,11 +17,9 @@ local function SourcePriority(src)
     if src == BANK_SRC then return 2 end
     if src == MAIL_SRC then return 3 end
     if src == AUCTIONS_SRC then return 4 end
-    return 5 -- Guild N
+    return 5
 end
 
--- Item links are always prefixed with their quality color (|cffRRGGBB), so the
--- row name can be colored without any GetItemInfo cache dependency.
 local function LinkRGB(link)
     local rr, gg, bb = link:match("^|cff(%x%x)(%x%x)(%x%x)")
     if not rr then return 1, 1, 1 end
@@ -163,7 +157,6 @@ function B.SearchEverywhere(query)
     end)
     found = found or {}
 
-    -- Group by character, then by source (Bags -> Bank -> Mail -> Auctions -> Guild).
     table.sort(found, function(a, b)
         if a.char ~= b.char then return a.char < b.char end
         local pa, pb = SourcePriority(a.source), SourcePriority(b.source)

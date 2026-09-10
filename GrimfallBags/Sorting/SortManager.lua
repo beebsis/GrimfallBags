@@ -1,11 +1,3 @@
--- GrimfallBags
--- Sorting/SortManager.lua
---
--- Step-based sorter for the live guild bank. Each OnUpdate tick performs at most
--- one pair of PickupGuildBankItem moves so sorting never blocks the client or
--- exceeds Blizzard's per-frame motion limits. The view owns guild-bank state and
--- drives this module via Start(tab) / Stop(); this module holds no view state.
-
 local B = GrimfallBags
 local S = Syndicator335
 local Log = B.Log
@@ -19,7 +11,6 @@ local function SortStep()
     local tab = driver.tab
     if not tab then return false end
 
-    -- Snapshot the tab: link, id, count, and max stack size per slot.
     local slots = {}
     for i = 1, B.GuildBankAPI.NUM_SLOTS do
         local _, cnt, locked = B.GuildBankAPI.GetSlotInfo(tab, i)
@@ -34,7 +25,6 @@ local function SortStep()
         }
     end
 
-    -- Pass 1: merge partial stacks of the same item.
     local partial = {}
     for _, s in ipairs(slots) do
         if s.id and s.count < s.max then
@@ -48,7 +38,6 @@ local function SortStep()
         end
     end
 
-    -- Pass 2: order by sort key, then by count, and swap out-of-place items.
     local items = {}
     for _, s in ipairs(slots) do
         if s.link then items[#items + 1] = s end

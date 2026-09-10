@@ -2,8 +2,6 @@ local B = GrimfallBags
 local S = Syndicator335
 local Log, Guard = B.Log, B.Guard
 
--- Recent-item state (backpack-only tracking; bank bags share item IDs but
--- must not be flagged "New" from a bag<->bank transfer).
 local recentItems = {}
 local baseline    = {}
 
@@ -56,8 +54,6 @@ local function IsRecent(id)
     return exp and exp > time()
 end
 
--- "Recent" only tracks backpack counts; a bank copy of the same item ID
--- would otherwise get flagged "New" just from moving it between bag/bank.
 local function IsRecentInBag(id, bag)
     return bag >= 0 and bag <= 4 and IsRecent(id)
 end
@@ -127,13 +123,6 @@ local function RefreshCurrencyRow(view)
 end
 B.RefreshCurrencyRow = RefreshCurrencyRow
 
--- Toggling "Show on Backpack" in Blizzard's own Currency tab context menu
--- (TokenFramePopup) calls SetCurrencyBackpack() directly -- confirmed
--- live, CURRENCY_DISPLAY_UPDATE doesn't reliably fire for that specific
--- change, only for amount changes, so the bottom currency row was only
--- ever catching up on the next window open. Hooking the Blizzard
--- function itself guarantees a refresh exactly when the checkbox
--- changes, regardless of what event (if any) accompanies it.
 if type(SetCurrencyBackpack) == "function" then
     hooksecurefunc("SetCurrencyBackpack", function()
         if B.bagView then B.RefreshCurrencyRow(B.bagView) end
@@ -161,8 +150,6 @@ local function BuildCharMenu(view, f)
     local charBtn = B.TitleIconButton(f, B.ASSETS.."All_Characters",
         "Characters: view bags/bank offline", function()
             local myKey = S.CharKey()
-            -- Only list characters from the current realm; keys from other
-            -- (e.g. test) servers end in a different realm suffix.
             local suffix = " - "..GetRealmName()
             local menu = {
                 {text = "Characters", isTitle = true, notCheckable = true},
@@ -257,12 +244,6 @@ local function BuildBagSlotRow(view, f, transBtn, sortBtn)
             view.UpdateBagRow()
         end)
 
-    -- transBtn is hidden by default (Transfers.lua shows it only at
-    -- a merchant/bank with matching items) but its anchor slot is
-    -- always reserved, which left a visible gap in the toolbar
-    -- whenever it wasn't shown. Reflow bagsBtn onto sortBtn directly
-    -- when transBtn is hidden, and back onto transBtn when it
-    -- reappears, instead of always reserving its space.
     local function RelayoutBagsBtn()
         bagsBtn:ClearAllPoints()
         if transBtn:IsShown() then
@@ -297,10 +278,6 @@ function B.FocusSearch()
     if B.bagView.searchBox then B.bagView.searchBox:SetFocus() end
 end
 
--- Map Blizzard's bag keybinds to the unified window. OpenAllBags must OPEN
--- (not toggle), otherwise a script/binding calling OpenAllBags() would close
--- an already-open window. Per-bag ToggleBag(id) is intentionally flattened to
--- the one unified window (a unified bag addon has no "just bag 2" window).
 local function HookBagFunctions()
     if not B.Config().replaceBags then return end
     local hooks = {
@@ -317,11 +294,6 @@ local function HookBagFunctions()
 end
 B.HookBagFunctions = HookBagFunctions
 
--- Re-assert the globals periodically so ElvUI's bag module (or a late-loading
--- addon) can't steal them after PLAYER_ENTERING_WORLD. Cheap: six comparisons
--- every 2s, reassigning only what was overwritten. Start only after
--- PLAYER_LOGIN so a saved replaceBags=false (the ElvUI "Keep ElvUI's" opt-out)
--- isn't stomped during the load window when the saved config isn't available.
 local reassert = CreateFrame("Frame")
 reassert:Hide()
 reassert:SetScript("OnUpdate", function(self, elapsed)
