@@ -34,6 +34,7 @@
 - "Junk" is always sorted last and can't be renamed or moved in the category editor.
 - Character-list bag/bank entries and guild-bank search layout spacing cleanups.
 - **`OpenAllBags` now opens instead of toggles**: a macro, another addon, or the Shift-B-style binding that calls `OpenAllBags()` no longer closes the bag window when it is already open. `CloseAllBags` remains close-only.
+- **Right-click equips/uses items again**: equippable gear (including two-handed weapons) equips via a direct `UseContainerItem` call, and consumables use via the secure "item" action, when right-clicked in the bag window.
 
 ### Notes
 

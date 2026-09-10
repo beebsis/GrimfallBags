@@ -293,15 +293,30 @@ local function AcquireButton(view, bag)
     local btn = view.buttons[view.nBtn]
     if not btn then
         local name = view.f:GetName().."Item"..view.nBtn
+        -- SecureActionButtonTemplate is added so right-click can use the item
+        -- through the client's secure path (see the attribute note below).
         if bag == -1 then
             local ok, created = pcall(CreateFrame, "Button", name,
-                                       view.bagParents[bag], "BankItemButtonGenericTemplate")
+                                       view.bagParents[bag],
+                                       "BankItemButtonGenericTemplate, SecureActionButtonTemplate")
             if ok and created then btn = created end
         end
         if not btn then
-            btn = CreateFrame("Button", name, view.bagParents[bag], "ContainerFrameItemButtonTemplate")
+            btn = CreateFrame("Button", name, view.bagParents[bag],
+                              "ContainerFrameItemButtonTemplate, SecureActionButtonTemplate")
         end
         btn:SetWidth(BTN); btn:SetHeight(BTN)
+        -- The template normally registers these in its OnLoad. Do it explicitly
+        -- so the slot stays clickable even if the inherited registration is
+        -- missing on a given client build (that makes items unusable).
+        btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        btn:RegisterForDrag("LeftButton")
+        -- Right-click: consumables / on-use items go through a secure "item"
+        -- action (the client only casts an item's on-use spell from a hardware
+        -- event), while equippable gear uses a direct UseContainerItem call in
+        -- the OnClick handler (two-handed weapons failed to equip through the
+        -- secure path). Left-click stays an ordinary pickup.
+        btn:SetAttribute("type2", "item")
         local ilvl = btn:CreateFontString(nil, "OVERLAY", "NumberFontNormalSmall")
         ilvl:SetPoint("TOPLEFT", btn, "TOPLEFT", 2, -2)
         ilvl:Hide()
@@ -350,15 +365,70 @@ local function AcquireButton(view, bag)
             GameTooltip:Show()
         end)
         btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        -- Shift-click toggles this slot as "ignored" (the sorter won't move it);
-        -- otherwise delegate to the template's normal pickup/use click handler.
-        local origClick = btn:GetScript("OnClick")
-        btn:SetScript("OnClick", function(self, button)
+        -- HookScript (not SetScript) so we append to, rather than replace, the
+        -- template's OnClick. SecureActionButtonTemplate overrides the container
+        -- template's own auto-pickup; our handler does the real work.
+        btn:HookScript("OnClick", function(self, button)
+            local isModifier = IsModifiedClick("CHATLINK") or IsModifiedClick("DRESSUP")
+                               or IsModifiedClick("SOCKETINFO")
+            local function Call(fn, ...)
+                local ok, err = pcall(fn, ...)
+                if B.clickDebug then
+                    B.Log("click-result: "..(ok and "ok" or ("ERROR: "..tostring(err))))
+                end
+            end
+            if B.clickDebug then
+                local parent = self:GetParent()
+                local _, count, locked = GetContainerItemInfo(self.bag, self:GetID())
+                local usable = (self.link and IsUsableItem(self.link)) and true or false
+                local cdStart, cdDur = GetContainerItemCooldown(self.bag, self:GetID())
+                local name = self.link and self.link:match("%[(.-)%]") or "?"
+                B.Log(string.format(
+                    "click: %s bag=%s parentID=%s slot=%s button=%s item='%s' id=%s count=%s link=%s handler=%s shift=%s modifier=%s locked=%s usable=%s cooldown=%s/%s deadOrGhost=%s combat=%s",
+                    tostring(self:GetName()), tostring(self.bag),
+                    tostring(parent and parent:GetID()), tostring(self:GetID()),
+                    tostring(button), name, tostring(S.ItemID(self.link)), tostring(count),
+                    tostring(self.link and 1 or 0),
+                    "lua",
+                    tostring(IsShiftKeyDown()), tostring(isModifier),
+                    tostring(locked), tostring(usable),
+                    tostring(cdStart), tostring(cdDur),
+                    tostring(UnitIsDeadOrGhost("player")), tostring(InCombatLockdown())))
+            end
             if button == "LeftButton" and IsShiftKeyDown() then
+                if B.clickDebug then B.Log("click-action: ignore-slot") end
                 B.ToggleIgnoredSlot(self.bag, self:GetID())
                 return
             end
-            if origClick then origClick(self, button) end
+            if button == "RightButton" then
+                -- Consumables / on-use items are handled by the secure action
+                -- (type2="item" + item2). Equippable gear falls back to a direct
+                -- UseContainerItem call here: equipping is allowed from addon Lua
+                -- out of combat, and two-handed weapons failed to equip through
+                -- the secure path. Bank containers can't be used in place.
+                if B.clickDebug then B.Log("click-action: right-click use") end
+                if not InCombatLockdown() and self.isEquip
+                   and self.bag and self.bag >= 0 and self.bag <= 4 then
+                    Call(UseContainerItem, self.bag, self:GetID())
+                end
+                return
+            end
+            -- Left-click modified actions (link / dress-up), then plain pickup.
+            if isModifier and self.link then
+                if B.clickDebug then B.Log("click-action: modified left-click") end
+                if IsModifiedClick("CHATLINK") then ChatEdit_InsertLink(self.link)
+                elseif IsModifiedClick("DRESSUP") then DressUpItemLink(self.link) end
+                return
+            end
+            -- Left-click pickup (not a protected action, so plain Lua is fine).
+            if B.clickDebug then
+                B.Log("click-action: pickup bag="..tostring(self.bag).." slot="..tostring(self:GetID()))
+            end
+            if self.bag == -1 then
+                Call(PickupInventoryItem, BankButtonIDToInvSlotID(self:GetID(), false))
+            else
+                Call(PickupContainerItem, self.bag, self:GetID())
+            end
         end)
         view.buttons[view.nBtn] = btn
     else
@@ -385,6 +455,16 @@ local function AcquireOfflineButton(view)
             end
         end)
         btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        -- Cached/offline entries are read-only by design; say so instead of
+        -- looking like a dead item when someone clicks them.
+        btn:SetScript("OnClick", function()
+            if not B.cachedViewHintShown then
+                B.cachedViewHintShown = true
+                print("|cff33aaff[GrimfallBags]|r This is a cached (offline) view - items "
+                      .."can't be used or moved from here. Pick your live character in the "
+                      .."character menu to go back.")
+            end
+        end)
         view.obuttons[view.nOBtn] = btn
     end
     btn:Show()
@@ -666,6 +746,29 @@ local function ApplyCountBadge(btn, link)
     btn.countBadge:Hide()
 end
 
+local function SetSecureItem(btn, bag, slot, isEquip)
+    if InCombatLockdown() then
+        btn.securePending = true
+        B.secureDirty = true
+        return
+    end
+    btn.securePending = nil
+    -- Only non-equippable player-bag items (consumables, on-use items) use the
+    -- secure action. Equippable gear is handled by the direct UseContainerItem
+    -- fallback in the OnClick handler (two-handed weapons failed to equip via
+    -- the secure path). Bank containers (-1, 5-11) can't be used in place.
+    if bag and bag >= 0 and bag <= 4 and slot and not isEquip then
+        local val = bag.." "..slot
+        if btn.secureItem ~= val then
+            btn.secureItem = val
+            btn:SetAttribute("item2", val)
+        end
+    elseif btn.secureItem then
+        btn.secureItem = nil
+        btn:SetAttribute("item2", nil)
+    end
+end
+
 local function FillLiveButton(btn, bag, slot, query, countOverride)
     btn:SetID(slot)
     local texture, count, locked, quality = GetContainerItemInfo(bag, slot)
@@ -678,9 +781,14 @@ local function FillLiveButton(btn, bag, slot, query, countOverride)
     btn.link = link
     -- GetContainerItemInfo's quality return is unreliable on this client
     -- (reports -1 for most non-equippable items); GetItemInfo's quality is
-    -- authoritative, so prefer it when available.
-    local giQuality = select(3, GetItemInfo(link or ""))
+    -- authoritative, so prefer it when available. The equip location (9th
+    -- return) drives right-click routing: equippable gear uses a direct
+    -- UseContainerItem call, everything else uses the secure "item" action.
+    local _, _, giQuality, _, _, _, _, _, equipLoc = GetItemInfo(link or "")
     if giQuality then quality = giQuality end
+    local isEquip = equipLoc and equipLoc ~= "" and equipLoc ~= "INVTYPE_BAG"
+    btn.isEquip = isEquip
+    SetSecureItem(btn, bag, slot, isEquip)
     -- countOverride is the combined total across merged stacks (see RefreshImpl);
     -- everything else here (texture/border/lock/cooldown) still reflects this
     -- specific slot, only the displayed/searched count changes.
@@ -1292,6 +1400,7 @@ evt:RegisterEvent("PLAYERBANKSLOTS_CHANGED")
 evt:RegisterEvent("BANKFRAME_OPENED")
 evt:RegisterEvent("BANKFRAME_CLOSED")
 evt:RegisterEvent("CURRENCY_DISPLAY_UPDATE")
+evt:RegisterEvent("PLAYER_REGEN_ENABLED")
 
 local dirty = false
 local dirtyDebounce = 0
@@ -1369,6 +1478,14 @@ evt:SetScript("OnEvent", function(self, event)
 
     elseif event == "CURRENCY_DISPLAY_UPDATE" then
         Guard("RefreshCurrency", B.RefreshCurrencyRow, B.bagView)
+
+    elseif event == "PLAYER_REGEN_ENABLED" then
+        -- Secure item attributes can only be written out of combat; re-apply
+        -- any that were deferred while the player was in combat.
+        if B.secureDirty then
+            B.secureDirty = nil
+            B.RefreshAll()
+        end
 
     elseif event == "BANKFRAME_OPENED" then
         if B.bankView then

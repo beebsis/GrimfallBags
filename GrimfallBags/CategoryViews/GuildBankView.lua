@@ -134,7 +134,14 @@ local function Initialize()
         btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         btn:RegisterForDrag("LeftButton")
         btn:SetScript("OnClick", function(self, mouse)
-            if not atGuildBank then return end
+            if not atGuildBank then
+                if not B.gbCachedHintShown then
+                    B.gbCachedHintShown = true
+                    print("|cff33aaff[GrimfallBags]|r Cached guild-bank view - items can't be "
+                          .."used or moved until you're actually at a guild bank.")
+                end
+                return
+            end
             if mouse == "RightButton" then
                 B.GuildBankAPI.AutoStoreItem(currentTab, self.slot)
             else

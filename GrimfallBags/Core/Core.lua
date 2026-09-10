@@ -96,6 +96,11 @@ SlashCmdList["GrimfallBags"] = function(msg)
         wipe(B.log)
         B.errorNotified = nil
         print("|cff33aaff[GrimfallBags]|r Log cleared.")
+    elseif msg == "clickdebug" then
+        B.clickDebug = not B.clickDebug
+        B.Log("clickdebug "..(B.clickDebug and "ON" or "OFF"))
+        print("|cff33aaff[GrimfallBags]|r Item click debug "
+              ..(B.clickDebug and "ON" or "OFF").." - click some bag items, then /gfbags log.")
     elseif msg == "junk" or msg == "junkdebug" then
         if B.DebugJunk then
             B.DebugJunk()
