@@ -1,0 +1,154 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.blizzard.com/wow/ui/
+..\FrameXML\UI.xsd">
+
+    <!-- ============================================================
+         Templates (instantiated by CategoryViews/GuildBankView.lua)
+         ============================================================ -->
+
+    <!-- Guild-bank tab button: 32x32 icon with a selection highlight. -->
+    <Button name="GrimfallBagsGBTabButtonTemplate" virtual="true">
+        <Size x="32" y="32"/>
+        <Layers>
+            <Layer level="BACKGROUND">
+                <Texture name="$parentIcon" file="Interface\Icons\INV_Misc_Bag_10">
+                    <Anchors>
+                        <Anchor point="TOPLEFT"/>
+                        <Anchor point="BOTTOMRIGHT"/>
+                    </Anchors>
+                </Texture>
+            </Layer>
+            <Layer level="OVERLAY">
+                <Texture name="$parentSel" file="Interface\Buttons\CheckButtonHilight" hidden="true">
+                    <Anchors>
+                        <Anchor point="TOPLEFT"/>
+                        <Anchor point="BOTTOMRIGHT"/>
+                    </Anchors>
+                </Texture>
+            </Layer>
+        </Layers>
+        <HighlightTexture file="Interface\Buttons\ButtonHilight-Square" alphaMode="ADD"/>
+    </Button>
+
+    <!-- Guild-bank item slot: 37x37 item button with a quality border. -->
+    <Button name="GrimfallBagsGBItemButtonTemplate" inherits="ItemButtonTemplate" virtual="true">
+        <Size x="37" y="37"/>
+        <Layers>
+            <Layer level="OVERLAY">
+                <Texture name="$parentQBorder" file="Interface\Buttons\UI-ActionButton-Border" hidden="true">
+                    <Size x="63" y="63"/>
+                    <Anchors>
+                        <Anchor point="CENTER"/>
+                    </Anchors>
+                </Texture>
+            </Layer>
+        </Layers>
+    </Button>
+
+    <!-- ============================================================
+         Main guild-bank window
+         ============================================================ -->
+    <Frame name="GrimfallBagsGuildBank" parent="UIParent" hidden="true" frameStrata="HIGH">
+        <Size x="566" y="393"/>
+        <Anchors>
+            <Anchor point="CENTER"/>
+        </Anchors>
+
+        <!-- FontStrings are regions and must live in Layers, not Frames. -->
+        <Layers>
+            <Layer level="OVERLAY">
+                <!-- Title (guild name) -->
+                <FontString name="GrimfallBagsGuildBankTitle" font="GameFontNormal">
+                    <Anchors>
+                        <Anchor point="TOP" relativePoint="TOP">
+                            <Offset><AbsDimension x="0" y="-8"/></Offset>
+                        </Anchor>
+                    </Anchors>
+                </FontString>
+
+                <!-- Money -->
+                <FontString name="GrimfallBagsGuildBankMoney" font="GameFontNormalSmall">
+                    <Anchors>
+                        <Anchor point="BOTTOMRIGHT" relativePoint="BOTTOMRIGHT">
+                            <Offset><AbsDimension x="-14" y="10"/></Offset>
+                        </Anchor>
+                    </Anchors>
+                </FontString>
+            </Layer>
+        </Layers>
+
+        <Frames>
+            <!-- Close button -->
+            <Button name="GrimfallBagsGuildBankClose" inherits="UIPanelCloseButton">
+                <Anchors>
+                    <Anchor point="TOPRIGHT" relativePoint="TOPRIGHT">
+                        <Offset><AbsDimension x="2" y="2"/></Offset>
+                    </Anchor>
+                </Anchors>
+            </Button>
+
+            <!-- View toggle (category/grid) -->
+            <Button name="GrimfallBagsGuildBankViewBtn">
+                <Size x="16" y="16"/>
+                <Anchors>
+                    <Anchor point="TOPRIGHT" relativePoint="TOPRIGHT">
+                        <Offset><AbsDimension x="-28" y="-8"/></Offset>
+                    </Anchor>
+                </Anchors>
+                <Layers>
+                    <Layer level="ARTWORK">
+                        <Texture name="GrimfallBagsGuildBankViewBtnIcon" file="Interface\AddOns\GrimfallBags\Assets\GuildTabText">
+                            <Anchors>
+                                <Anchor point="TOPLEFT"/>
+                                <Anchor point="BOTTOMRIGHT"/>
+                            </Anchors>
+                            <TexCoords left="0.07" right="0.93" top="0.07" bottom="0.93"/>
+                        </Texture>
+                    </Layer>
+                </Layers>
+                <HighlightTexture file="Interface\Buttons\ButtonHilight-Square" alphaMode="ADD"/>
+            </Button>
+
+            <!-- Sort -->
+            <Button name="GrimfallBagsGuildBankSortBtn">
+                <Size x="16" y="16"/>
+                <Anchors>
+                    <Anchor point="RIGHT" relativeTo="GrimfallBagsGuildBankViewBtn" relativePoint="LEFT">
+                        <Offset><AbsDimension x="-3" y="0"/></Offset>
+                    </Anchor>
+                </Anchors>
+                <Layers>
+                    <Layer level="ARTWORK">
+                        <Texture name="GrimfallBagsGuildBankSortBtnIcon" file="Interface\AddOns\GrimfallBags\Assets\Sorting">
+                            <Anchors>
+                                <Anchor point="TOPLEFT"/>
+                                <Anchor point="BOTTOMRIGHT"/>
+                            </Anchors>
+                            <TexCoords left="0.07" right="0.93" top="0.07" bottom="0.93"/>
+                        </Texture>
+                    </Layer>
+                </Layers>
+                <HighlightTexture file="Interface\Buttons\ButtonHilight-Square" alphaMode="ADD"/>
+            </Button>
+
+            <!-- Deposit button -->
+            <Button name="GrimfallBagsGuildBankDepositBtn" inherits="UIPanelButtonTemplate">
+                <Size x="90" y="20"/>
+                <Anchors>
+                    <Anchor point="BOTTOMLEFT" relativePoint="BOTTOMLEFT">
+                        <Offset><AbsDimension x="10" y="8"/></Offset>
+                    </Anchor>
+                </Anchors>
+            </Button>
+
+            <!-- Withdraw button -->
+            <Button name="GrimfallBagsGuildBankWithdrawBtn" inherits="UIPanelButtonTemplate">
+                <Size x="90" y="20"/>
+                <Anchors>
+                    <Anchor point="LEFT" relativeTo="GrimfallBagsGuildBankDepositBtn" relativePoint="RIGHT">
+                        <Offset><AbsDimension x="6" y="0"/></Offset>
+                    </Anchor>
+                </Anchors>
+            </Button>
+        </Frames>
+    </Frame>
+</Ui>

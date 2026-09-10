@@ -1,7 +1,15 @@
 local B = {}
 _G["GrimfallBags"] = B
 
-B.VERSION = "1.3.0"
+B.VERSION = "2.0.0"
+
+-- Keybinding labels for Bindings.xml (shown in the Key Bindings UI).
+BINDING_HEADER_GRIMFALLBAGS = "Grimfall Bags"
+BINDING_NAME_GFBAGS_TOGGLEBAGS = "Toggle Bags"
+BINDING_NAME_GFBAGS_OPENBANK   = "Open Bank"
+BINDING_NAME_GFBAGS_OPENGB     = "Open Guild Bank"
+BINDING_NAME_GFBAGS_SORT       = "Sort Bags"
+BINDING_NAME_GFBAGS_SEARCH     = "Search"
 
 local LOG_MAX = 200
 B.log = {}
@@ -30,6 +38,7 @@ local DEFAULTS = {
     showSearchFilters = true,
     greyJunk     = true,
     showILvl     = true,
+    showCrossCharCount = true,
     mergeStacks  = true,
     recentSecs   = 120,
     sortMethod   = "type",
@@ -38,21 +47,18 @@ local DEFAULTS = {
     replaceGuildBank = true,
     gbCategoryView = false,
     showTmogDot  = true,
-    showTagTooltip = true,
-    showItemID   = true,
-    autoOpenMerchant = false,
-    autoOpenMailbox  = false,
     autoRepair       = false,
     autoSellJunk     = false,
     elvuiPromptShown = false,
     elvuiBagsMigrationPrompted = false,
-    elvuiSkin        = true,
+    skin             = "flat",
     pos          = {},
     winWidth     = {},
     rules        = {},
     sections     = {},
     hiddenCats   = {},
     sectionCollapsed = {},
+    ignoredSlots = {},
     profiles     = {},
 }
 
@@ -64,6 +70,8 @@ function B.Config()
             if type(v) == "table" then c[k] = {} else c[k] = v end
         end
     end
+    -- Retire the old elvuiSkin boolean in favor of the skin dropdown value.
+    if c.elvuiSkin ~= nil then c.elvuiSkin = nil end
     return c
 end
 
@@ -90,6 +98,12 @@ SlashCmdList["GrimfallBags"] = function(msg)
         wipe(B.log)
         B.errorNotified = nil
         print("|cff33aaff[GrimfallBags]|r Log cleared.")
+    elseif msg == "junk" or msg == "junkdebug" then
+        if B.DebugJunk then
+            B.DebugJunk()
+        else
+            print("|cffff3333[GrimfallBags]|r DebugJunk not available.")
+        end
     elseif msg == "options" then
         if B.ToggleOptions then B.ToggleOptions() end
     elseif msg == "disableelvuibags" then

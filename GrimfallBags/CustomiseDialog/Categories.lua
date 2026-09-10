@@ -18,19 +18,22 @@ function B.GetItemTags(link)
 end
 
 local function ShowItemTooltipInfo(tt, link)
-    local cfg = B.Config()
+    -- Always-on info: item ID and the item's GrimfallBags category tags.
     local shown = false
     local id = S.ItemID(link)
-    if cfg.showItemID and id then
+    if id then
         tt:AddLine("|cff33aaffItem ID:|r "..id, 1, 1, 1)
         shown = true
     end
-    if cfg.showTagTooltip then
-        local tags = B.GetItemTags(link)
-        if #tags > 0 then
-            tt:AddLine("|cff33aaffGrimfallBags tags:|r "..table.concat(tags, ", "), 1, 1, 1, true)
-            shown = true
-        end
+    local tags = B.GetItemTags(link)
+    if #tags > 0 then
+        tt:AddLine("|cff33aaffGrimfallBags tags:|r "..table.concat(tags, ", "), 1, 1, 1, true)
+        shown = true
+    end
+    local cat = B.Categorize({l = link})
+    if cat and cat ~= "" then
+        tt:AddLine("|cff33aaffCategory:|r "..cat, 1, 1, 1)
+        shown = true
     end
     if B.IsItemSellProtected and B.IsItemSellProtected(link) then
         tt:AddLine("|cffff8888Protected - skipped by category/bulk sell|r", 1, 1, 1, true)
@@ -125,27 +128,43 @@ function B.SeedBiSCategory()
     B.Log("BiS category seeded (sell-protected)")
 end
 
--- Matches on quality alone (the "junk" search keyword means quality == 0), not
--- item type, so a grey weapon/armor/whatever all land here instead of under
--- their type category. Inserted at the front so it wins over the type-tag
--- rules; "sortLast" keeps it displayed at the bottom regardless of that.
+-- Junk matches on quality alone (the "junk" search keyword means quality == 0),
+-- so grey items always land here instead of their type category. It is pinned
+-- to the bottom ("sortLast") and treated as locked: grey items must always go
+-- to Junk, never to a type category like "Miscellaneous".
 function B.SeedJunkCategory()
     local cfg = B.Config()
-    if cfg.junkSeeded then return end
-    cfg.junkSeeded = true
     for _, r in ipairs(cfg.rules) do
-        if r.name == "Junk" then return end
+        if r.name == "Junk" then
+            cfg.junkSeeded = true
+            -- Self-heal: keep Junk pinned to the bottom across older saves that
+            -- may have dropped the flag.
+            if not r.sortLast then
+                r.sortLast = true
+                B.Log("Junk category pinned to bottom")
+            end
+            return
+        end
     end
+    -- Self-heal: restore a missing Junk rule even when the legacy one-shot
+    -- "junkSeeded" flag already fired - the rule can be lost by config imports,
+    -- partial saves, or older bugs, and then never comes back. Only an explicit
+    -- delete through the editor (sets cfg.noJunk) keeps it gone on purpose.
+    if cfg.noJunk then return end
+    cfg.junkSeeded = true
     table.insert(cfg.rules, 1, {name = "Junk", query = "junk", sortLast = true})
     B.Log("Junk category seeded (sorts last)")
 end
 
-local function RuleHasTag(rule, tag)
-    for _, t in ipairs(rule.tags or {}) do
-        if t == tag then return true end
-    end
-    return false
-end
+-- Tags that cannot come from an item's type/subtype/equip-slot but live in its
+-- tooltip text instead (e.g. Grimfall's "Heroic x/5" line). A rule using one of
+-- these as a tag is matched against the tooltip text, same as a plain search
+-- term, so a category like {name="Heroic", tags={"heroic"}, query="heroic"}
+-- actually catches those items.
+local TOOLTIP_TAGS = {
+    heroic = true,
+    heroisch = true,
+}
 
 local function FindOrCreateRule(catName)
     local rules = B.Config().rules
@@ -183,6 +202,17 @@ function B.Categorize(entry)
         end
     end
 
+    -- Junk always wins over the tag/query rules: a grey (quality 0) item must
+    -- land in Junk no matter where the Junk rule sits in the list, so it can
+    -- never fall through to a type category like "Miscellaneous".
+    if not cfg.noJunk and entry and entry.l then
+        local q = entry.q
+        if q == nil or q < 0 then
+            q = select(3, GetItemInfo(entry.l or ""))
+        end
+        if q == 0 then return "Junk" end
+    end
+
     local itemTags
     for _, rule in ipairs(cfg.rules) do
         local hasTags  = rule.tags and #rule.tags > 0
@@ -192,8 +222,17 @@ function B.Categorize(entry)
             if hasTags then
                 itemTags = itemTags or B.GetItemTags(entry.l)
                 tagMatch = false
-                for _, tag in ipairs(itemTags) do
-                    if RuleHasTag(rule, tag) then tagMatch = true; break end
+                for _, tag in ipairs(rule.tags) do
+                    local matched = false
+                    for _, it in ipairs(itemTags) do
+                        if it == tag then matched = true; break end
+                    end
+                    -- Tooltip-only pseudo-tag (e.g. "heroic"): fall back to the
+                    -- tooltip text when the item-type tags don't carry it.
+                    if not matched and TOOLTIP_TAGS[tag] and S.Search.Matches(entry, tag) then
+                        matched = true
+                    end
+                    if matched then tagMatch = true; break end
                 end
             end
             local queryMatch = not hasQuery or S.Search.Matches(entry, rule.query)
@@ -219,6 +258,40 @@ end
 function B.IsItemSellProtected(link)
     if not link then return false end
     return B.IsCategoryProtected(B.Categorize({l = link}))
+end
+
+-- /gfbags junk - dumps what the junk machinery sees right now: the Junk rule
+-- state and, for every poor (quality 0) item in the backpack, where it actually
+-- got categorized (and why it may be missing from the Junk group).
+function B.DebugJunk()
+    local cfg = B.Config()
+    local junkRule, junkIdx
+    for i, r in ipairs(cfg.rules) do
+        if r.name == "Junk" then junkRule, junkIdx = r, i break end
+    end
+    B.Log("junkdebug: viewType="..tostring(cfg.viewType)
+          .." autoSellJunk="..tostring(cfg.autoSellJunk)
+          .." junkSeeded="..tostring(cfg.junkSeeded)
+          .." hiddenCats[Junk]="..tostring(cfg.hiddenCats["Junk"] == true)
+          .." Junk rule="..(junkRule and ("present @"..junkIdx.." query='"..tostring(junkRule.query).."' sortLast="..tostring(junkRule.sortLast)) or "MISSING"))
+    local n = 0
+    for _, bag in ipairs(B.PLAYER_BAGS) do
+        for slot = 1, GetContainerNumSlots(bag) or 0 do
+            local link = GetContainerItemLink(bag, slot)
+            if link then
+                local _, count, _, qCont = GetContainerItemInfo(bag, slot)
+                local qItem = select(3, GetItemInfo(link or ""))
+                local itemType = select(6, GetItemInfo(link or ""))
+                local name = link:match("%[(.-)%]") or link
+                if qCont == 0 then n = n + 1 end
+                B.Log(string.format("  junkdebug: qCont=%s qItem=%s type=%s cat=%s [%s]",
+                    tostring(qCont), tostring(qItem), tostring(itemType),
+                    B.Categorize({l = link, c = count, q = qCont}), name))
+            end
+        end
+    end
+    B.Log("junkdebug: poor items found in bags: "..n)
+    print("|cff33aaff[GrimfallBags]|r Junk debug written to the log - |cffffcc00/gfbags log|r")
 end
 
 function B.RulesToArray()
@@ -337,7 +410,7 @@ local function ShowDragGhost(label)
         bg:SetTexture(0, 0, 0, 0.75)
         local txt = g:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         txt:SetPoint("CENTER")
-        txt:SetTextColor(1, 0.82, 0)
+        txt:SetTextColor(unpack(B.COLOR_ACCENT))
         g.text = txt
         g:SetScript("OnUpdate", function(self)
             local scale = UIParent:GetEffectiveScale()
@@ -471,13 +544,14 @@ end
 local function MoveRule(idx, delta)
     local rules = B.Config().rules
     local target = idx + delta
-    if rules[idx] and rules[target] then
-        rules[idx], rules[target] = rules[target], rules[idx]
-        if editIdx == idx then editIdx = target
-        elseif editIdx == target then editIdx = idx end
-        RefreshDialog()
-        if B.RefreshAll then B.RefreshAll() end
-    end
+    if not (rules[idx] and rules[target]) then return end
+    -- Junk is locked: never reorder it, and never swap another rule past it.
+    if rules[idx].name == "Junk" or rules[target].name == "Junk" then return end
+    rules[idx], rules[target] = rules[target], rules[idx]
+    if editIdx == idx then editIdx = target
+    elseif editIdx == target then editIdx = idx end
+    RefreshDialog()
+    if B.RefreshAll then B.RefreshAll() end
 end
 
 local function LoadEditPane()
@@ -508,7 +582,9 @@ local function LoadEditPane()
         d.idBox:SetText(table.concat(ids, ", "))
         d.hiddenCB:SetChecked(B.Config().hiddenCats[r.name] and true or false)
         d.protectedCB:SetChecked(r.protected == true)
-        d.sortLastCB:SetChecked(r.sortLast == true)
+        local isJunk = (r.name == "Junk")
+        d.sortLastCB:SetChecked(isJunk or r.sortLast == true)
+        if isJunk then d.sortLastCB:Disable() else d.sortLastCB:Enable() end
         d.saveBtn:SetText(SAVE or "Save")
         d.delBtn:Show()
         local n = 0
@@ -529,6 +605,7 @@ local function LoadEditPane()
         d.hiddenCB:SetChecked(false)
         d.protectedCB:SetChecked(false)
         d.sortLastCB:SetChecked(false)
+        d.sortLastCB:Enable()
         d.saveBtn:SetText(ADD or "Add")
         d.delBtn:Hide()
         d.pinText:SetText("")
@@ -559,7 +636,9 @@ RefreshDialog = function()
             local r = rules[entry.idx]
             row.idx = entry.idx
             row.headerName = nil
-            row.up:Show(); row.down:Show()
+            local isJunk = (r.name == "Junk")
+            if isJunk then row.up:Hide(); row.down:Hide()
+            else row.up:Show(); row.down:Show() end
             row.text:ClearAllPoints()
             local indent = (r.section and r.section ~= "") and 14 or 0
             row.text:SetPoint("LEFT", row.down, "RIGHT", 5 + indent, 0)
@@ -568,6 +647,7 @@ RefreshDialog = function()
                           (row.idx == editIdx and "|cff33ff33" or "|cffffcc00")
             local suffix = (hidden and " |cffff5555(hidden)|r" or "")
                          ..(r.protected and " |cffff8888(protected)|r" or "")
+                         ..(isJunk and " |cff888888(locked)|r" or "")
             row.text:SetText(color..r.name.."|r"..suffix)
             row:Show()
         else
@@ -590,7 +670,7 @@ function B.BuildCategoriesPanel(parent)
     listBG:SetHeight(RULE_ROWS * RULE_ROW_H + 8)
     listBG:SetBackdrop(B.PANEL_BD)
     listBG:SetBackdropColor(0, 0, 0, 0.5)
-    listBG:SetBackdropBorderColor(0.3, 0.3, 0.3, 1)
+    listBG:SetBackdropBorderColor(unpack(B.COLOR_BORDER))
 
     local scroll = CreateFrame("ScrollFrame", "GrimfallBagsCatScroll", listBG, "FauxScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", listBG, "TOPLEFT", 4, -4)
@@ -657,8 +737,9 @@ function B.BuildCategoriesPanel(parent)
         row:RegisterForDrag("LeftButton")
         row:SetScript("OnDragStart", function(self)
             if self.idx then
-                draggingIdx = self.idx
                 local r = B.Config().rules[self.idx]
+                if r and r.name == "Junk" then return end  -- Junk is locked
+                draggingIdx = self.idx
                 ShowDragGhost(r and r.name)
             end
         end)
@@ -911,6 +992,11 @@ function B.BuildCategoriesPanel(parent)
         local rule
         if editIdx and rules[editIdx] then
             rule = rules[editIdx]
+            if rule.name == "Junk" and name ~= "Junk" then
+                -- Junk is locked: its name can't be changed.
+                name = "Junk"
+                d.nameBox:SetText("Junk")
+            end
             if rule.name ~= name then
                 B.Config().hiddenCats[name] = B.Config().hiddenCats[rule.name]
                 B.Config().hiddenCats[rule.name] = nil
@@ -926,7 +1012,7 @@ function B.BuildCategoriesPanel(parent)
         local sec  = d.secBox:GetText()
         rule.section = (sec ~= "" and sec or nil)
         rule.protected = d.protectedCB:GetChecked() and true or nil
-        rule.sortLast = d.sortLastCB:GetChecked() and true or nil
+        rule.sortLast = (name == "Junk") or (d.sortLastCB:GetChecked() and true or nil)
 
         local ids = {}
         for numStr in d.idBox:GetText():gmatch("[^,]+") do
@@ -979,6 +1065,11 @@ function B.BuildCategoriesPanel(parent)
             return
         end
         if editIdx and B.Config().rules[editIdx] then
+            -- Deleting the seeded Junk category on purpose: remember it so
+            -- SeedJunkCategory doesn't resurrect it on the next login.
+            if B.Config().rules[editIdx].name == "Junk" then
+                B.Config().noJunk = true
+            end
             table.remove(B.Config().rules, editIdx)
             editIdx = nil
             RefreshDialog()
@@ -988,11 +1079,13 @@ function B.BuildCategoriesPanel(parent)
     B.SkinButton(d.delBtn)
 
     local hint = d:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    hint:SetPoint("BOTTOMLEFT", d, "BOTTOMLEFT", paneX, 14)
-    hint:SetWidth(290)
+    hint:SetPoint("LEFT", d, "LEFT", 12, 0)
+    hint:SetPoint("TOP", newSectionBtn, "BOTTOM", 0, -6)
+    hint:SetWidth(614)
     hint:SetJustifyH("LEFT")
+    hint:SetWordWrap(true)
     hint:SetTextColor(0.5, 0.5, 0.5)
-    hint:SetText("Order = priority (top wins). Pinned items override all rules - drag an item onto the category title, or type item IDs above. Tags + Search together must BOTH match (e.g. mail armor that's also spirit gear). Search also scans tooltip text, so stats like 'spirit' work. Super-groups (Equipment, Crafting, ...): click 'New Section' to create one, then drag categories onto its header (or type its name in the Super-group field above) to add them. Click a group's header to rename or ungroup it.")
+    hint:SetText("Order = priority (top wins). Pinned items override all rules - drag an item onto the category title, or type item IDs above. Tags + Search together must BOTH match (e.g. mail armor that's also spirit gear). Search also scans tooltip text, so stats like 'spirit' work (and tooltip-only tags like 'heroic' match the same 'Heroic x/5' line). Super-groups (Equipment, Crafting, ...): click 'New Section' to create one, then drag categories onto its header (or type its name in the Super-group field above) to add them. Click a group's header to rename or ungroup it.")
 
     d:SetScript("OnShow", RefreshDialog)
 end

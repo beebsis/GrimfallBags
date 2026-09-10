@@ -1,0 +1,17 @@
+<Bindings>
+	<Binding name="GFBAGS_TOGGLEBAGS" header="GRIMFALLBAGS">
+		GrimfallBags.ToggleBags()
+	</Binding>
+	<Binding name="GFBAGS_OPENBANK" header="GRIMFALLBAGS">
+		GrimfallBags.OpenBank()
+	</Binding>
+	<Binding name="GFBAGS_OPENGB" header="GRIMFALLBAGS">
+		GrimfallBags.OpenGuildBank()
+	</Binding>
+	<Binding name="GFBAGS_SORT" header="GRIMFALLBAGS">
+		GrimfallBags.SortBags()
+	</Binding>
+	<Binding name="GFBAGS_SEARCH" header="GRIMFALLBAGS">
+		GrimfallBags.FocusSearch()
+	</Binding>
+</Bindings>
