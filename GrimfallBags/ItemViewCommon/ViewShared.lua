@@ -44,8 +44,15 @@ end)
 
 GameTooltip:HookScript("OnUpdate", function(self)
     if currentAnchorOwner and self:IsShown() and self:GetOwner() == currentAnchorOwner then
-        self:ClearAllPoints()
-        self:SetPoint("TOPRIGHT", currentAnchorOwner, "TOPLEFT", currentAnchorX, currentAnchorY)
+        -- Re-assert only when something actually moved the tooltip; an
+        -- unconditional ClearAllPoints/SetPoint pair every frame is itself a
+        -- flicker source while an item changes out from under the tooltip.
+        local point, relTo, relPoint, x, y = self:GetPoint(1)
+        if point ~= "TOPRIGHT" or relTo ~= currentAnchorOwner or relPoint ~= "TOPLEFT"
+           or x ~= currentAnchorX or y ~= currentAnchorY then
+            self:ClearAllPoints()
+            self:SetPoint("TOPRIGHT", currentAnchorOwner, "TOPLEFT", currentAnchorX, currentAnchorY)
+        end
     end
 end)
 
@@ -407,6 +414,7 @@ local function AcquireButton(view, bag)
                 -- out of combat, and two-handed weapons failed to equip through
                 -- the secure path. Bank containers can't be used in place.
                 if B.clickDebug then B.Log("click-action: right-click use") end
+                GameTooltip:Hide()
                 if not InCombatLockdown() and self.isEquip
                    and self.bag and self.bag >= 0 and self.bag <= 4 then
                     Call(UseContainerItem, self.bag, self:GetID())
@@ -424,6 +432,7 @@ local function AcquireButton(view, bag)
             if B.clickDebug then
                 B.Log("click-action: pickup bag="..tostring(self.bag).." slot="..tostring(self:GetID()))
             end
+            GameTooltip:Hide()
             if self.bag == -1 then
                 Call(PickupInventoryItem, BankButtonIDToInvSlotID(self:GetID(), false))
             else
@@ -861,10 +870,11 @@ local function RefreshImpl(view)
     SyncLayoutConstants(view)
     local cfg = B.Config()
 
-    for i = 1, view.nBtn  do view.buttons[i]:Hide()  end
-    for i = 1, view.nOBtn do view.obuttons[i]:Hide() end
-    for i = 1, view.nHdr  do view.headers[i]:Hide()  end
-    for i = 1, view.nSHdr do view.sheaders[i]:Hide() end
+    -- Don't hide every button up front: hiding then re-showing the same slot in
+    -- one refresh makes the icons blink and re-fires OnEnter/OnLeave (tooltip
+    -- flicker) on the slot under the mouse. Reset the counters and hide only the
+    -- buttons left over at the end instead.
+    local prevBtn, prevOBtn, prevHdr, prevSHdr = view.nBtn, view.nOBtn, view.nHdr, view.nSHdr
     view.nBtn, view.nOBtn, view.nHdr, view.nSHdr = 0, 0, 0, 0
 
     local off
@@ -1197,6 +1207,11 @@ local function RefreshImpl(view)
         view.moneyText:SetText(B.MoneyString(off and off.money or GetMoney()))
     end
     if view.UpdateBagRow then view.UpdateBagRow() end
+
+    for i = view.nBtn  + 1, prevBtn  do view.buttons[i]:Hide()  end
+    for i = view.nOBtn + 1, prevOBtn do view.obuttons[i]:Hide() end
+    for i = view.nHdr  + 1, prevHdr  do view.headers[i]:Hide()  end
+    for i = view.nSHdr + 1, prevSHdr do view.sheaders[i]:Hide() end
 end
 
 function B.RefreshView(view)

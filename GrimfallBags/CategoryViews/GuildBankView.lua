@@ -135,8 +135,6 @@ local function Initialize()
         btn:RegisterForDrag("LeftButton")
         btn:SetScript("OnClick", function(self, mouse)
             if not atGuildBank then
-                -- Cached/remote guild-bank view: clicking cannot do anything
-                -- server-side. Say so once instead of silently ignoring clicks.
                 if not B.gbCachedHintShown then
                     B.gbCachedHintShown = true
                     print("|cff33aaff[GrimfallBags]|r Cached guild-bank view - items can't be "
