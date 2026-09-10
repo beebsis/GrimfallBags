@@ -9,11 +9,16 @@ function B.SortKey(link)
     local name, _, quality, iLvl, _, itemType, subType = GetItemInfo(link or "")
     name, quality, iLvl = name or "", quality or 0, iLvl or 0
     itemType, subType = itemType or "", subType or ""
+    local id = S.ItemID(link) or 0
     local method = B.Config().sortMethod
     if method == "quality" then
         return string.format("%02d|%s|%s|%s", 9 - quality, itemType, subType, name)
     elseif method == "ilvl" then
         return string.format("%04d|%s", 9999 - iLvl, name)
+    elseif method == "name" then
+        return name:lower()
+    elseif method == "id" then
+        return string.format("%08d", id)
     else
         return string.format("%s|%s|%02d|%s", itemType, subType, 9 - quality, name)
     end
@@ -62,6 +67,7 @@ local function SortStep(st, bags)
                 id = S.ItemID(link), count = count or 0,
                 max = link and (select(8, GetItemInfo(link)) or 1) or 1,
                 key = link and B.SortKey(link) or nil,
+                ignored = B.IsSlotIgnored(bag, slot),
             }
         end
     end
@@ -87,7 +93,7 @@ local function SortStep(st, bags)
 
     local partial = {}
     for _, s in ipairs(slots) do
-        if s.id and s.count < s.max and not st.badMergeIds[s.id] then
+        if not s.ignored and s.id and s.count < s.max and not st.badMergeIds[s.id] then
             local o = partial[s.id]
             if o then
                 st.lastMerge = {
@@ -107,13 +113,18 @@ local function SortStep(st, bags)
 
     local items = {}
     for _, s in ipairs(slots) do
-        if s.link then items[#items+1] = s end
+        if s.link and not s.ignored then items[#items+1] = s end
     end
     table.sort(items, function(a, b)
         if a.key ~= b.key then return a.key < b.key end
         if a.count ~= b.count then return a.count > b.count end
         return a.id < b.id
     end)
+
+    local targets = {}
+    for _, s in ipairs(slots) do
+        if not s.ignored then targets[#targets+1] = s end
+    end
 
     local pos = 1
     while pos <= #items do
@@ -127,7 +138,7 @@ local function SortStep(st, bags)
 
         local inRange = {}
         for p = rangeStart, rangeEnd do
-            local t = slots[p]
+            local t = targets[p]
             if not t then break end
             inRange[t.bag..":"..t.slot] = true
         end
@@ -143,7 +154,7 @@ local function SortStep(st, bags)
 
         if misplaced then
             for p = rangeStart, rangeEnd do
-                local t = slots[p]
+                local t = targets[p]
                 if not t then break end
                 local memberOfGroup = t.link and t.key == first.key and t.count == first.count
                 if not memberOfGroup then
@@ -190,4 +201,8 @@ function B.StartSort(bags)
     sorter.recent      = {}
     sorter:Show()
     Log("Sort started (method: "..B.Config().sortMethod..")")
+end
+
+function B.SortBags()
+    B.StartSort(B.PLAYER_BAGS)
 end

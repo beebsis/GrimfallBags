@@ -19,12 +19,28 @@ local function AnchorItemTooltip(owner)
     local xOfs, yOfs = 0, 0
     if left - tipW < 0 then xOfs = tipW - left end
     if top - tipH < 0 then yOfs = tipH - top end
+    owner.gbItemTip = true
     currentAnchorOwner, currentAnchorX, currentAnchorY = owner, xOfs, yOfs
     GameTooltip:SetClampedToScreen(false)
     GameTooltip:ClearAllPoints()
     GameTooltip:SetPoint("TOPRIGHT", owner, "TOPLEFT", xOfs, yOfs)
 end
 B.AnchorItemTooltip = AnchorItemTooltip
+
+-- Clamping is managed per-owner instead of globally. Our item buttons (marked
+-- gbItemTip) keep clamping off so the manual offset + the OnUpdate re-assertion
+-- below fully own their position and stay flicker-free. Any other owner turns
+-- Blizzard's clamping back on at SetOwner time -- before Show positions the
+-- tooltip -- so normal tooltips (character sheet, Blizzard bags, ...) still
+-- stay on screen near the edges.
+hooksecurefunc(GameTooltip, "SetOwner", function(self, owner)
+    if owner and owner.gbItemTip then
+        self:SetClampedToScreen(false)
+    else
+        currentAnchorOwner = nil
+        self:SetClampedToScreen(true)
+    end
+end)
 
 GameTooltip:HookScript("OnUpdate", function(self)
     if currentAnchorOwner and self:IsShown() and self:GetOwner() == currentAnchorOwner then
@@ -35,77 +51,199 @@ end)
 
 local COLS, BTN = 12, 37
 local BTN_PAD   = 2
-local PAD       = 10
+PAD             = 10
 local TITLE_H   = 24
 local SEARCH_H  = 24
 local FILTER_H  = 22
+local SEARCH_PAD = 8
 local HEADER_H  = 16
 local WIDTH     = 0
 
-local bagView, bankView
+-- Shared search box + quick-filter builder used by the bag, bank, and guild
+-- bank views so they behave identically. `refreshFn` runs after the query
+-- changes and when the filter row is shown/hidden. Stores the query on
+-- `view.searchStr` (per-window, never persisted across sessions).
+function B.BuildSearchFilter(view, f, refreshFn, name, rowY)
+    local sbox = CreateFrame("EditBox", name.."Search", f, "InputBoxTemplate")
+    sbox:SetHeight(20)
+    sbox:SetPoint("TOPLEFT",  f, "TOPLEFT",  PAD + 6, rowY)
+    sbox:SetPoint("TOPRIGHT", f, "TOPRIGHT", -(PAD + 4), rowY)
+    sbox:SetAutoFocus(false)
+    sbox:SetMaxLetters(60)
+    sbox:SetTextInsets(16, 16, 0, 0)
 
-local recentItems = {}
-local baseline    = {}
+    local searchIcon = sbox:CreateTexture(nil, "OVERLAY")
+    searchIcon:SetSize(12, 12)
+    searchIcon:SetPoint("LEFT", sbox, "LEFT", 2, 0)
+    searchIcon:SetTexture(B.ASSETS.."Search")
+    searchIcon:SetTexCoord(0.1, 0.9, 0.1, 0.9)
+    searchIcon:SetAlpha(0.6)
 
-local function LoadRecentState()
-    local cfg = B.Config()
-    cfg.newState = cfg.newState or {}
-    local key = Syndicator335.CharKey()
-    local st = cfg.newState[key]
-    if not st then
-        st = {baseline = {}, recent = {}}
-        cfg.newState[key] = st
-    end
-    baseline    = st.baseline
-    recentItems = st.recent
-end
+    local clearBtn = CreateFrame("Button", nil, sbox)
+    clearBtn:SetSize(14, 14)
+    clearBtn:SetPoint("RIGHT", sbox, "RIGHT", -2, 0)
+    local clearTex = clearBtn:CreateTexture(nil, "OVERLAY")
+    clearTex:SetAllPoints()
+    clearTex:SetTexture("Interface\\Buttons\\UI-StopButton")
+    clearBtn:SetScript("OnClick", function()
+        sbox:SetText("")
+        sbox:ClearFocus()
+    end)
+    clearBtn:Hide()
 
-local function CountBagItems()
-    local t = {}
-    for _, bag in ipairs(B.PLAYER_BAGS) do
-        for slot = 1, GetContainerNumSlots(bag) or 0 do
-            local link = GetContainerItemLink(bag, slot)
-            local id = S.ItemID(link)
-            if id then
-                local _, cnt = GetContainerItemInfo(bag, slot)
-                t[id] = (t[id] or 0) + (cnt or 1)
+    local placeholder = sbox:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    placeholder:SetPoint("LEFT", sbox, "LEFT", 16, 0)
+    placeholder:SetTextColor(0.45, 0.45, 0.45)
+    placeholder:SetText((SEARCH or "Search").."  (e.g. potion | food, >200 & boe, !junk)")
+    local UpdateFilterHighlights
+
+    sbox:SetScript("OnTextChanged", function(self)
+        view.searchStr = self:GetText()
+        local hasText = self:GetText() ~= ""
+        if hasText then placeholder:Hide() else placeholder:Show() end
+        if hasText then clearBtn:Show() else clearBtn:Hide() end
+        if UpdateFilterHighlights then UpdateFilterHighlights() end
+        refreshFn()
+    end)
+    sbox:SetScript("OnEscapePressed", sbox.ClearFocus)
+    sbox:SetScript("OnEnterPressed", function(self)
+        local query = self:GetText()
+        self:ClearFocus()
+        B.SearchEverywhere(query)
+    end)
+    view.searchBox = sbox
+    B.SkinEdit(sbox)
+
+    f:HookScript("OnShow", function() sbox:ClearFocus() end)
+
+    local qualityBtns, typeBtns = {}, {}
+
+    local function RelayoutFilterRow()
+        local shown = B.Config().showSearchFilters
+        local y = rowY - SEARCH_H
+        local prev
+        local function place(b, gap)
+            b:ClearAllPoints()
+            if prev then
+                b:SetPoint("LEFT", prev, "RIGHT", gap, 0)
+            else
+                b:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + 6, y)
             end
+            prev = b
+        end
+        for _, b in ipairs(qualityBtns) do
+            if shown then b:Show(); place(b, 3) else b:Hide() end
+        end
+        for i, b in ipairs(typeBtns) do
+            if shown then b:Show(); place(b, i == 1 and 10 or 4) else b:Hide() end
         end
     end
-    return t
-end
 
-local function UpdateRecent()
-    local counts = CountBagItems()
-    if next(baseline) == nil then
-        for id, cnt in pairs(counts) do baseline[id] = cnt end
-        return
-    end
-    for id, cnt in pairs(counts) do
-        if cnt > (baseline[id] or 0) then
-            recentItems[id] = time() + B.Config().recentSecs
+    local function ApplyQuickFilter(word)
+        if sbox:GetText():lower() == word then
+            sbox:SetText("")
+        else
+            sbox:SetText(word)
         end
-        baseline[id] = cnt
     end
-end
 
-local function IsRecent(id)
-    local exp = id and recentItems[id]
-    return exp and exp > time()
-end
-
--- "Recent" only tracks backpack counts; a bank copy of the same item ID
--- would otherwise get flagged "New" just from moving it between bag/bank.
-local function IsRecentInBag(id, bag)
-    return bag >= 0 and bag <= 4 and IsRecent(id)
-end
-
-local function ExpireRecent()
-    local now, changed = time(), false
-    for id, exp in pairs(recentItems) do
-        if exp <= now then recentItems[id] = nil; changed = true end
+    UpdateFilterHighlights = function()
+        local cur = sbox:GetText():lower()
+        for _, b in ipairs(qualityBtns) do
+            if b.word == cur then b.sel:Show() else b.sel:Hide() end
+        end
+        for _, b in ipairs(typeBtns) do
+            if b.word == cur then b.sel:Show() else b.sel:Hide() end
+        end
     end
-    return changed
+
+    local QUALITY_FILTERS = {
+        {word="poor", q=0}, {word="common", q=1}, {word="uncommon", q=2},
+        {word="rare", q=3}, {word="epic", q=4}, {word="legendary", q=5},
+    }
+    for _, qf in ipairs(QUALITY_FILTERS) do
+        local b = CreateFrame("Button", nil, f)
+        b:SetSize(14, 14)
+        local r, g, bl = GetItemQualityColor(qf.q)
+        local swatch = b:CreateTexture(nil, "ARTWORK")
+        swatch:SetPoint("TOPLEFT", 1, -1)
+        swatch:SetPoint("BOTTOMRIGHT", -1, 1)
+        swatch:SetTexture(r, g, bl)
+        local sel = b:CreateTexture(nil, "OVERLAY")
+        sel:SetAllPoints()
+        sel:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
+        sel:SetBlendMode("ADD")
+        sel:SetVertexColor(1, 1, 1, 0.9)
+        sel:Hide()
+        b.sel = sel
+        b.word = qf.word
+        b:SetScript("OnClick", function() ApplyQuickFilter(qf.word) end)
+        b:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:SetText((qf.word:gsub("^%l", string.upper)))
+            GameTooltip:Show()
+        end)
+        b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        qualityBtns[#qualityBtns+1] = b
+    end
+
+    local TYPE_FILTERS = {
+        {label="Wpn", word="weapon"},   {label="Arm", word="armor"},
+        {label="Con", word="consumable"}, {label="Trd", word="trade goods"},
+        {label="Qst", word="quest"},    {label="Jnk", word="junk"},
+        {label="BoE", word="boe"},      {label="New", word="new"},
+    }
+    for i, tf in ipairs(TYPE_FILTERS) do
+        local b = CreateFrame("Button", nil, f)
+        b:SetHeight(FILTER_H - 4)
+        local lbl = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+        lbl:SetPoint("CENTER")
+        lbl:SetText(tf.label)
+        b:SetWidth(lbl:GetStringWidth() + 10)
+        local sel = b:CreateTexture(nil, "BACKGROUND")
+        sel:SetAllPoints()
+        sel:SetTexture(B.COLOR_ACCENT[1], B.COLOR_ACCENT[2], B.COLOR_ACCENT[3], 0.35)
+        sel:Hide()
+        b.sel = sel
+        b.word = tf.word
+        b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+        local hl = b:GetHighlightTexture()
+        if hl then hl:SetVertexColor(B.COLOR_ACCENT[1], B.COLOR_ACCENT[2], B.COLOR_ACCENT[3]) end
+        b:SetScript("OnClick", function() ApplyQuickFilter(tf.word) end)
+        typeBtns[#typeBtns+1] = b
+    end
+
+    local function UpdateSearchBarVisibility()
+        if B.Config().showSearchFilters then sbox:Show() else sbox:Hide() end
+    end
+
+    local function UpdateFilterVisibility()
+        UpdateSearchBarVisibility()
+        RelayoutFilterRow()
+        refreshFn()
+    end
+    UpdateFilterVisibility()
+
+    -- Register so the shared toggle can re-apply visibility to every window at once.
+    B.searchFilters = B.searchFilters or {}
+    B.searchFilters[#B.searchFilters + 1] = UpdateFilterVisibility
+
+    return { sbox = sbox, UpdateFilterVisibility = UpdateFilterVisibility }
+end
+
+-- Extra vertical height the search/filter rows add to a window when shown.
+function B.SearchChromeExtra()
+    return B.Config().showSearchFilters and (SEARCH_H + FILTER_H + SEARCH_PAD) or 0
+end
+
+-- Toggle the search/filter visibility across every window that has it
+-- (bags, bank, and guild bank) at the same time.
+function B.ToggleSearchFilters()
+    local cfg = B.Config()
+    cfg.showSearchFilters = not cfg.showSearchFilters
+    for _, apply in ipairs(B.searchFilters or {}) do
+        apply()
+    end
 end
 
 local function CreateView(name, titleText, bagIDs)
@@ -148,6 +286,7 @@ local function CreateView(name, titleText, bagIDs)
 
     return view
 end
+B.CreateView = CreateView
 
 local function AcquireButton(view, bag)
     view.nBtn = view.nBtn + 1
@@ -211,6 +350,16 @@ local function AcquireButton(view, bag)
             GameTooltip:Show()
         end)
         btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        -- Shift-click toggles this slot as "ignored" (the sorter won't move it);
+        -- otherwise delegate to the template's normal pickup/use click handler.
+        local origClick = btn:GetScript("OnClick")
+        btn:SetScript("OnClick", function(self, button)
+            if button == "LeftButton" and IsShiftKeyDown() then
+                B.ToggleIgnoredSlot(self.bag, self:GetID())
+                return
+            end
+            if origClick then origClick(self, button) end
+        end)
         view.buttons[view.nBtn] = btn
     else
         btn:SetParent(view.bagParents[bag])
@@ -255,7 +404,7 @@ local function AcquireSectionHeader(view)
         h.line:SetTexture(0.4, 0.4, 0.45, 0.6)
         h.lbl = h:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         h.lbl:SetPoint("LEFT", h, "LEFT", 2, -2)
-        h.lbl:SetTextColor(1, 0.82, 0)
+        h.lbl:SetTextColor(unpack(B.COLOR_ACCENT))
         h:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
         h:SetScript("OnClick", function(self)
             local cc = B.Config().sectionCollapsed
@@ -268,6 +417,29 @@ local function AcquireSectionHeader(view)
     return h
 end
 
+local headerMenu
+local function ShowHeaderMenu(h)
+    headerMenu = headerMenu or CreateFrame("Frame", "GrimfallBagsHeaderMenu", UIParent, "UIDropDownMenuTemplate")
+    local n = (h.items and #h.items) or 0
+    local protected = B.IsCategoryProtected and B.IsCategoryProtected(h.cat) or false
+    local canSell  = (not protected) and n > 0 and B.IsAtMerchant and B.IsAtMerchant()
+    local canBank  = (not protected) and n > 0 and B.IsAtBank and B.IsAtBank()
+    local canGuild = (not protected) and n > 0
+        and B.GuildBankView and B.GuildBankView.IsOpen and B.GuildBankView.IsOpen()
+    local suffix = n > 0 and (" ("..n..")") or ""
+    local menu = {
+        {text = h.cat or "Category", isTitle = true, notCheckable = true},
+        {text = "Sell"..suffix, notCheckable = true, disabled = not canSell,
+         func = function() B.SellCategory(h.items, h.cat) end},
+        {text = "Deposit to bank"..suffix, notCheckable = true, disabled = not canBank,
+         func = function() B.DepositCategory(h.items, h.cat, "bank") end},
+        {text = "Deposit to guild bank"..suffix, notCheckable = true, disabled = not canGuild,
+         func = function() B.DepositCategory(h.items, h.cat, "guild") end},
+        {text = CANCEL or "Cancel", notCheckable = true, func = function() end},
+    }
+    EasyMenu(menu, headerMenu, "cursor", 0, 0, "MENU")
+end
+
 local function AcquireHeader(view)
     view.nHdr = view.nHdr + 1
     local h = view.headers[view.nHdr]
@@ -276,7 +448,7 @@ local function AcquireHeader(view)
         h:SetHeight(HEADER_H)
         h.lbl = h:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         h.lbl:SetPoint("LEFT", h, "LEFT", 0, 0)
-        h.lbl:SetTextColor(1, 0.82, 0)
+        h.lbl:SetTextColor(unpack(B.COLOR_ACCENT))
         h:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
         h.SetText = function(self, text)
             self.lbl:SetText(text)
@@ -285,17 +457,7 @@ local function AcquireHeader(view)
         h:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         h:SetScript("OnClick", function(self, button)
             if button == "RightButton" then
-                if not B.IsAtMerchant or not B.IsAtMerchant() then return end
-                if not self.cat or not self.items or #self.items == 0 then return end
-                if B.IsCategoryProtected and B.IsCategoryProtected(self.cat) then
-                    print("|cffff5555[GrimfallBags]|r '"..self.cat.."' is a protected category - can't sell from it.")
-                    return
-                end
-                if IsShiftKeyDown() then
-                    B.SellCategoryConfirmed(self.items, self.cat)
-                else
-                    B.SellCategory(self.items, self.cat)
-                end
+                ShowHeaderMenu(self)
                 return
             end
             if self.cat and self.catAssignable and CursorHasItem() then
@@ -308,16 +470,13 @@ local function AcquireHeader(view)
             end
         end)
         h:SetScript("OnEnter", function(self)
-            if self.cat and B.IsAtMerchant and B.IsAtMerchant() and self.items and #self.items > 0 then
+            if self.cat then
                 GameTooltip:SetOwner(self, "ANCHOR_TOP")
                 GameTooltip:SetText(self.cat)
                 if B.IsCategoryProtected and B.IsCategoryProtected(self.cat) then
-                    GameTooltip:AddLine("Protected - can't sell from this category", 1, 0.4, 0.4, true)
-                else
-                    GameTooltip:AddLine("Right-click to sell all "..#self.items.." items here",
-                                         0.6, 0.9, 0.6, true)
-                    GameTooltip:AddLine("Shift-right-click to sell instantly, no confirmation",
-                                         0.6, 0.6, 0.6, true)
+                    GameTooltip:AddLine("Protected category", 1, 0.4, 0.4, true)
+                elseif self.items and #self.items > 0 then
+                    GameTooltip:AddLine("Right-click for actions ("..#self.items.." items)", 0.6, 0.9, 0.6, true)
                 end
                 GameTooltip:Show()
             end
@@ -430,6 +589,83 @@ local function ApplyILvl(btn, link, quality)
     btn.ilvl:Hide()
 end
 
+-- Cross-character count badge: total bags+bank+mail count of this item across
+-- every character, cached by item ID and invalidated on S.OnDataChanged.
+local crossCharCountCache = {}
+
+function B.GetCrossCharCount(itemID)
+    if crossCharCountCache[itemID] ~= nil then return crossCharCountCache[itemID] end
+    local total = 0
+    for _, key in ipairs(S.API.GetAllCharacters()) do
+        local c = S.Data().chars[key]
+        local counts = c and c.counts and c.counts[itemID]
+        if counts then
+            total = total + (counts.bags or 0) + (counts.bank or 0) + (counts.mail or 0)
+        end
+    end
+    crossCharCountCache[itemID] = total
+    return total
+end
+
+function B.InvalidateCrossCharCounts()
+    wipe(crossCharCountCache)
+    B.RefreshAll()
+end
+
+function B.IsSlotIgnored(bag, slot)
+    local set = B.Config().ignoredSlots
+    return set and set[bag..":"..slot] == true
+end
+
+function B.ToggleIgnoredSlot(bag, slot)
+    local cfg = B.Config()
+    cfg.ignoredSlots = cfg.ignoredSlots or {}
+    local key = bag..":"..slot
+    if cfg.ignoredSlots[key] then
+        cfg.ignoredSlots[key] = nil
+    else
+        cfg.ignoredSlots[key] = true
+    end
+    B.RefreshAll()
+end
+
+local function ApplyIgnoreDot(btn, bag, slot)
+    if not btn.ignoreDot then
+        local t = btn:CreateTexture(nil, "OVERLAY")
+        t:SetSize(8, 8)
+        t:SetPoint("TOP", btn, "TOP", 0, -1)
+        t:SetTexture(1, 0.78, 0.15, 0.95)
+        t:Hide()
+        btn.ignoreDot = t
+    end
+    if B.IsSlotIgnored(bag, slot) then
+        btn.ignoreDot:Show()
+    else
+        btn.ignoreDot:Hide()
+    end
+end
+
+local function ApplyCountBadge(btn, link)
+    if not btn.countBadge then
+        local fs = btn:CreateFontString(nil, "OVERLAY", "NumberFontNormalSmall")
+        fs:SetPoint("BOTTOMLEFT", btn, "BOTTOMLEFT", 2, 2)
+        fs:SetTextColor(0.4, 0.75, 1, 0.95)
+        fs:SetShadowOffset(1, -1)
+        fs:SetShadowColor(0, 0, 0, 0.8)
+        btn.countBadge = fs
+    end
+    local id = S.ItemID(link)
+    if link and id and B.Config().showCrossCharCount then
+        local total = B.GetCrossCharCount(id)
+        if total and total > 1 then
+            btn.countBadge:SetText(total)
+            btn.countBadge:Show()
+            return
+        end
+    end
+    btn.countBadge:Hide()
+end
+
 local function FillLiveButton(btn, bag, slot, query, countOverride)
     btn:SetID(slot)
     local texture, count, locked, quality = GetContainerItemInfo(bag, slot)
@@ -440,6 +676,11 @@ local function FillLiveButton(btn, bag, slot, query, countOverride)
         link = GetContainerItemLink(bag, slot)
     end
     btn.link = link
+    -- GetContainerItemInfo's quality return is unreliable on this client
+    -- (reports -1 for most non-equippable items); GetItemInfo's quality is
+    -- authoritative, so prefer it when available.
+    local giQuality = select(3, GetItemInfo(link or ""))
+    if giQuality then quality = giQuality end
     -- countOverride is the combined total across merged stacks (see RefreshImpl);
     -- everything else here (texture/border/lock/cooldown) still reflects this
     -- specific slot, only the displayed/searched count changes.
@@ -449,12 +690,18 @@ local function FillLiveButton(btn, bag, slot, query, countOverride)
     -- fetched texture above; the two calls can race during rapid bag/bank
     -- changes, pairing one item's icon with a different item's data.
     SetItemButtonTexture(btn, (link and GetItemIcon(link)) or texture)
-    SetItemButtonCount(btn, count)
+    if B.Config().showCrossCharCount then
+        SetItemButtonCount(btn, 1)
+    else
+        SetItemButtonCount(btn, count)
+    end
     SetItemButtonDesaturated(btn, locked or (B.Config().greyJunk and quality == 0))
 
-    ApplyBorder(btn, quality, IsRecentInBag(S.ItemID(link), bag))
+    ApplyBorder(btn, quality, B.IsRecentInBag(S.ItemID(link), bag))
     ApplyILvl(btn, link, quality)
     ApplyTmogDot(btn, link)
+    ApplyCountBadge(btn, link)
+    ApplyIgnoreDot(btn, bag, slot)
 
     local cd = _G[btn:GetName().."Cooldown"]
     if cd then
@@ -463,7 +710,7 @@ local function FillLiveButton(btn, bag, slot, query, countOverride)
 
     if query and query ~= "" then
         btn:SetAlpha(link and S.Search.Matches(
-            {l=link, c=count, q=quality, isNew=IsRecentInBag(S.ItemID(link), bag)}, query) and 1 or 0.25)
+            {l=link, c=count, q=quality, isNew=B.IsRecentInBag(S.ItemID(link), bag)}, query) and 1 or 0.25)
     else
         btn:SetAlpha(1)
     end
@@ -477,10 +724,15 @@ local function FillOfflineButton(btn, it, query)
         if cnt then cnt:SetText(it.free); cnt:Show() end
     else
         SetItemButtonTexture(btn, it.t or "Interface\\Icons\\INV_Misc_QuestionMark")
-        SetItemButtonCount(btn, it.c)
+        if B.Config().showCrossCharCount then
+            SetItemButtonCount(btn, 1)
+        else
+            SetItemButtonCount(btn, it.c)
+        end
     end
     ApplyBorder(btn, it.q, false)
     ApplyTmogDot(btn, it.l)
+    ApplyCountBadge(btn, it.l)
     if query and query ~= "" and not it.isEmpty then
         btn:SetAlpha(S.Search.Matches(it, query) and 1 or 0.25)
     else
@@ -493,7 +745,7 @@ local function SyncLayoutConstants(view)
 end
 
 local function ChromeExtraHeight(cfg)
-    return cfg.showSearchFilters and (SEARCH_H + FILTER_H) or 0
+    return cfg.showSearchFilters and (SEARCH_H + FILTER_H + SEARCH_PAD) or 0
 end
 
 local function RefreshImpl(view)
@@ -513,8 +765,8 @@ local function RefreshImpl(view)
         if not off then view.offline = nil end
     end
     if view.offline then
-        view.title:SetText("|cffaaaaff"..view.offline.key..
-            (view.offline.which == "bank" and "  ("..(BANK or "Bank")..")" or "").."|r")
+        view.title:SetText(view.offline.key..
+            (view.offline.which == "bank" and "  ("..(BANK or "Bank")..")" or ""))
     else
         view.title:SetText(view.defaultTitle)
     end
@@ -568,7 +820,7 @@ local function RefreshImpl(view)
                     local _, count, _, quality = GetContainerItemInfo(bag, slot)
                     local entry = {l=link, c=count, q=quality}
                     local cat
-                    if IsRecentInBag(S.ItemID(link), bag) then
+                    if B.IsRecentInBag(S.ItemID(link), bag) then
                         cat = B.RECENT_LABEL
                     else
                         cat = B.Categorize(entry)
@@ -839,101 +1091,23 @@ local function RefreshImpl(view)
     if view.UpdateBagRow then view.UpdateBagRow() end
 end
 
-local function Refresh(view)
+function B.RefreshView(view)
     if not view then return end
     Guard("Refresh:"..view.f:GetName(), RefreshImpl, view)
 end
 
 function B.RefreshAll()
-    Refresh(bagView)
-    Refresh(bankView)
-    if B.RefreshGuildBank then B.RefreshGuildBank() end
+    B.RefreshView(B.bagView)
+    B.RefreshView(B.bankView)
+    if B.GuildBankView then B.GuildBankView.Refresh() end
 end
 
-local function GetWatchedCurrencies()
-    local list = {}
-    for i = 1, GetCurrencyListSize() do
-        local name, isHeader, _, _, isWatched, count, _, icon = GetCurrencyListInfo(i)
-        if not isHeader and isWatched then
-            list[#list+1] = {name = name, count = count, icon = icon, index = i}
-        end
-    end
-    return list
+function B.DefaultViewWidth()
+    return WIDTH
 end
 
-local function RefreshCurrencyRow(view)
-    if not view.moneyText then return end
-    view.currencyPairs = view.currencyPairs or {}
-    local list = GetWatchedCurrencies()
-    local prevAnchor = view.moneyText
-
-    for i, cur in ipairs(list) do
-        local pair = view.currencyPairs[i]
-        if not pair then
-            pair = CreateFrame("Button", nil, view.f)
-            pair:SetHeight(16)
-            local icon = pair:CreateTexture(nil, "ARTWORK")
-            icon:SetSize(14, 14)
-            icon:SetPoint("RIGHT", pair, "RIGHT", 0, 0)
-            pair.icon = icon
-            local txt = pair:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            txt:SetPoint("RIGHT", icon, "LEFT", -2, 0)
-            pair.txt = txt
-            pair:SetScript("OnEnter", function(self)
-                GameTooltip:SetOwner(self, "ANCHOR_TOP")
-                GameTooltip:SetText(self.currencyName, 1, 0.82, 0)
-                GameTooltip:AddLine(tostring(self.currencyCount), 1, 1, 1)
-                GameTooltip:Show()
-            end)
-            pair:SetScript("OnLeave", function() GameTooltip:Hide() end)
-            view.currencyPairs[i] = pair
-        end
-        pair.icon:SetTexture(cur.icon)
-        pair.txt:SetText(cur.count)
-        pair.currencyName = cur.name
-        pair.currencyCount = cur.count
-        pair:SetWidth(14 + 2 + pair.txt:GetStringWidth() + 6)
-        pair:ClearAllPoints()
-        pair:SetPoint("RIGHT", prevAnchor, "LEFT", -8, 0)
-        pair:Show()
-        prevAnchor = pair
-    end
-    for i = #list + 1, #view.currencyPairs do
-        view.currencyPairs[i]:Hide()
-    end
-end
-B.RefreshCurrencyRow = RefreshCurrencyRow
-
--- Toggling "Show on Backpack" in Blizzard's own Currency tab context menu
--- (TokenFramePopup) calls SetCurrencyBackpack() directly -- confirmed
--- live, CURRENCY_DISPLAY_UPDATE doesn't reliably fire for that specific
--- change, only for amount changes, so the bottom currency row was only
--- ever catching up on the next window open. Hooking the Blizzard
--- function itself guarantees a refresh exactly when the checkbox
--- changes, regardless of what event (if any) accompanies it.
-if type(SetCurrencyBackpack) == "function" then
-    hooksecurefunc("SetCurrencyBackpack", function()
-        if bagView then RefreshCurrencyRow(bagView) end
-    end)
-end
-
-local function CollectAllTransmog()
-    for _, bag in ipairs(B.PLAYER_BAGS) do
-        for slot = 1, GetContainerNumSlots(bag) or 0 do
-            local itemID = GetContainerItemID(bag, slot)
-            if itemID then
-                local quality = select(3, GetItemInfo(itemID))
-                if quality and quality < 5 then
-                    C_AppearanceCollection.CollectItemAppearance(GetContainerItemGUID(bag, slot))
-                end
-            end
-        end
-    end
-    B.WipeTmogCache()
-    B.RefreshAll()
-end
-
-local function AddToolbar(view, isBank)
+function B.AddToolbar(view, opts)
+    local isBank = opts and opts.isBank
     local f = view.f
     local tmogBtn
 
@@ -969,6 +1143,21 @@ local function AddToolbar(view, isBank)
     transBtn:Hide()
     view.transferBtn = transBtn
 
+    -- Bank-only bulk actions: explicit "everything" moves that always confirm.
+    local depositAllBtn, withdrawAllBtn
+    if isBank then
+        depositAllBtn = B.TitleIconButton(f, B.ASSETS.."Chest",
+            "Deposit all items into the bank", function() B.DepositAll() end)
+        depositAllBtn:SetPoint("RIGHT", transBtn, "LEFT", -3, 0)
+        depositAllBtn:Hide()
+        withdrawAllBtn = B.TitleIconButton(f, B.ASSETS.."Bags",
+            "Withdraw all items from the bank", function() B.WithdrawAll() end)
+        withdrawAllBtn:SetPoint("RIGHT", depositAllBtn, "LEFT", -3, 0)
+        withdrawAllBtn:Hide()
+        view.depositAllBtn = depositAllBtn
+        view.withdrawAllBtn = withdrawAllBtn
+    end
+
     -- Grimfall doesn't have a transmog system (this was Ascension-only
     -- functionality) -- left commented rather than deleted in case
     -- Grimfall adds one later, since CollectAllTransmog/B.InitTmogAPI/
@@ -987,356 +1176,29 @@ local function AddToolbar(view, isBank)
     end
     --]]
 
-    if not isBank then
-        local charMenu = CreateFrame("Frame", "GrimfallBagsCharMenu", UIParent, "UIDropDownMenuTemplate")
-        local charBtn = B.TitleIconButton(f, B.ASSETS.."All_Characters",
-            "Characters: view bags/bank offline", function()
-                local myKey = S.CharKey()
-                local menu = {
-                    {text = "Characters", isTitle = true, notCheckable = true},
-                    {text = myKey.."  |cff33ff33(live)|r", notCheckable = true,
-                     func = function() view.offline = nil; Refresh(view) end},
-                }
-                for _, key in ipairs(S.API.GetAllCharacters()) do
-                    if key ~= myKey then
-                        local c = S.API.GetCharacter(key)
-                        local color = "|cffcccccc"
-                        local cc = c.class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[c.class]
-                        if cc then
-                            color = string.format("|cff%02x%02x%02x", cc.r*255, cc.g*255, cc.b*255)
-                        end
-                        menu[#menu+1] = {text = color..key.."|r", notCheckable = true,
-                            func = function()
-                                view.offline = {key = key, which = "bags"}
-                                Refresh(view)
-                            end}
-                        if c.bank then
-                            menu[#menu+1] = {text = "    "..(BANK or "Bank"), notCheckable = true,
-                                func = function()
-                                    view.offline = {key = key, which = "bank"}
-                                    Refresh(view)
-                                end}
-                        end
-                    end
-                end
-                EasyMenu(menu, charMenu, "cursor", 0, 0, "MENU")
-            end)
-        charBtn:SetPoint("TOPLEFT", f, "TOPLEFT", PAD - 2, -(PAD - 2))
+    if opts and opts.buildCharMenu then
+        opts.buildCharMenu(view, f)
     end
 
     local rowY = -(PAD + TITLE_H - 2)
-    local sbox = CreateFrame("EditBox", f:GetName().."Search", f, "InputBoxTemplate")
-    sbox:SetHeight(20)
-    sbox:SetPoint("TOPLEFT",  f, "TOPLEFT",  PAD + 6, rowY)
-    sbox:SetPoint("TOPRIGHT", f, "TOPRIGHT", -(PAD + 4), rowY)
-    sbox:SetAutoFocus(false)
-    sbox:SetMaxLetters(60)
-    sbox:SetTextInsets(16, 16, 0, 0)
-
-    local searchIcon = sbox:CreateTexture(nil, "OVERLAY")
-    searchIcon:SetSize(12, 12)
-    searchIcon:SetPoint("LEFT", sbox, "LEFT", 2, 0)
-    searchIcon:SetTexture(B.ASSETS.."Search")
-    searchIcon:SetTexCoord(0.1, 0.9, 0.1, 0.9)
-    searchIcon:SetAlpha(0.6)
-
-    local clearBtn = CreateFrame("Button", nil, sbox)
-    clearBtn:SetSize(14, 14)
-    clearBtn:SetPoint("RIGHT", sbox, "RIGHT", -2, 0)
-    local clearTex = clearBtn:CreateTexture(nil, "OVERLAY")
-    clearTex:SetAllPoints()
-    clearTex:SetTexture("Interface\\Buttons\\UI-StopButton")
-    clearBtn:SetScript("OnClick", function()
-        sbox:SetText("")
-        sbox:ClearFocus()
-    end)
-    clearBtn:Hide()
-
-    local placeholder = sbox:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    placeholder:SetPoint("LEFT", sbox, "LEFT", 16, 0)
-    placeholder:SetTextColor(0.45, 0.45, 0.45)
-    placeholder:SetText((SEARCH or "Search").."  (e.g. potion | food, >200 & boe, !junk)")
-    local UpdateFilterHighlights
-
-    sbox:SetScript("OnTextChanged", function(self)
-        view.searchStr = self:GetText()
-        local hasText = self:GetText() ~= ""
-        if hasText then placeholder:Hide() else placeholder:Show() end
-        if hasText then clearBtn:Show() else clearBtn:Hide() end
-        if UpdateFilterHighlights then UpdateFilterHighlights() end
-        Refresh(view)
-    end)
-    sbox:SetScript("OnEscapePressed", sbox.ClearFocus)
-    view.searchBox = sbox
-    B.SkinEdit(sbox)
-
-    f:HookScript("OnShow", function() sbox:ClearFocus() end)
-
-    local qualityBtns, typeBtns = {}, {}
-
-    local function RelayoutFilterRow()
-        local shown = B.Config().showSearchFilters
-        local y = rowY - SEARCH_H
-        local prev
-        local function place(b, gap)
-            b:ClearAllPoints()
-            if prev then
-                b:SetPoint("LEFT", prev, "RIGHT", gap, 0)
-            else
-                b:SetPoint("TOPLEFT", f, "TOPLEFT", PAD + 6, y)
-            end
-            prev = b
-        end
-        for _, b in ipairs(qualityBtns) do
-            if shown then b:Show(); place(b, 3) else b:Hide() end
-        end
-        for i, b in ipairs(typeBtns) do
-            if shown then b:Show(); place(b, i == 1 and 10 or 4) else b:Hide() end
-        end
-    end
-
-    local function ApplyQuickFilter(word)
-        if sbox:GetText():lower() == word then
-            sbox:SetText("")
-        else
-            sbox:SetText(word)
-        end
-    end
-
-    UpdateFilterHighlights = function()
-        local cur = sbox:GetText():lower()
-        for _, b in ipairs(qualityBtns) do
-            if b.word == cur then b.sel:Show() else b.sel:Hide() end
-        end
-        for _, b in ipairs(typeBtns) do
-            if b.word == cur then b.sel:Show() else b.sel:Hide() end
-        end
-    end
-
-    local QUALITY_FILTERS = {
-        {word="poor", q=0}, {word="common", q=1}, {word="uncommon", q=2},
-        {word="rare", q=3}, {word="epic", q=4}, {word="legendary", q=5},
-    }
-    for _, qf in ipairs(QUALITY_FILTERS) do
-        local b = CreateFrame("Button", nil, f)
-        b:SetSize(14, 14)
-
-        local r, g, bl = GetItemQualityColor(qf.q)
-        local swatch = b:CreateTexture(nil, "ARTWORK")
-        swatch:SetPoint("TOPLEFT", 1, -1)
-        swatch:SetPoint("BOTTOMRIGHT", -1, 1)
-        swatch:SetTexture(r, g, bl)
-
-        local sel = b:CreateTexture(nil, "OVERLAY")
-        sel:SetAllPoints()
-        sel:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
-        sel:SetBlendMode("ADD")
-        sel:SetVertexColor(1, 1, 1, 0.9)
-        sel:Hide()
-        b.sel = sel
-        b.word = qf.word
-
-        b:SetScript("OnClick", function() ApplyQuickFilter(qf.word) end)
-        b:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:SetText((qf.word:gsub("^%l", string.upper)))
-            GameTooltip:Show()
-        end)
-        b:SetScript("OnLeave", function() GameTooltip:Hide() end)
-        qualityBtns[#qualityBtns+1] = b
-    end
-
-    local TYPE_FILTERS = {
-        {label="Wpn", word="weapon"},   {label="Arm", word="armor"},
-        {label="Con", word="consumable"}, {label="Trd", word="trade goods"},
-        {label="Qst", word="quest"},    {label="Jnk", word="junk"},
-        {label="BoE", word="boe"},      {label="New", word="new"},
-    }
-    for i, tf in ipairs(TYPE_FILTERS) do
-        local b = CreateFrame("Button", nil, f)
-        b:SetHeight(FILTER_H - 4)
-        local lbl = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        lbl:SetPoint("CENTER")
-        lbl:SetText(tf.label)
-        b:SetWidth(lbl:GetStringWidth() + 10)
-
-        local sel = b:CreateTexture(nil, "BACKGROUND")
-        sel:SetAllPoints()
-        sel:SetTexture(0.3, 0.55, 0.85, 0.35)
-        sel:Hide()
-        b.sel = sel
-        b.word = tf.word
-
-        b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
-        b:SetScript("OnClick", function() ApplyQuickFilter(tf.word) end)
-        typeBtns[#typeBtns+1] = b
-    end
-
-    local function UpdateSearchBarVisibility()
-        if B.Config().showSearchFilters then sbox:Show() else sbox:Hide() end
-    end
-
-    local function UpdateFilterVisibility()
-        UpdateSearchBarVisibility()
-        RelayoutFilterRow()
-        Refresh(view)
-    end
-    UpdateFilterVisibility()
+    local searchFilter = B.BuildSearchFilter(view, f, function() B.RefreshView(view) end, f:GetName(), rowY)
 
     local filtersBtn = B.TitleIconButton(f, B.ASSETS.."Search",
         "Show/hide search & filters", function()
-            local cfg = B.Config()
-            cfg.showSearchFilters = not cfg.showSearchFilters
-            UpdateFilterVisibility()
+            B.ToggleSearchFilters()
         end)
 
     local bagsBtn
-    if not isBank then
-        local slotBtns = {}
-        local prev
-        for _, bag in ipairs(B.PLAYER_BAGS) do
-            local b = CreateFrame("Button", f:GetName().."BagSlot"..bag, f)
-            b:SetWidth(28); b:SetHeight(28)
-            if prev then b:SetPoint("LEFT", prev, "RIGHT", 2, 0)
-            else b:SetPoint("BOTTOMLEFT", f, "TOPLEFT", PAD, 1) end
-            prev = b
-            b.bag = bag
-            local icon = b:CreateTexture(nil, "BACKGROUND")
-            icon:SetAllPoints()
-            b.iconTex = icon
-            b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
-            b:SetScript("OnEnter", function(self)
-                GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-                if self.bag == 0 then
-                    GameTooltip:SetText(BACKPACK_TOOLTIP or "Backpack")
-                else
-                    GameTooltip:SetInventoryItem("player", ContainerIDToInventoryID(self.bag))
-                end
-                GameTooltip:Show()
-            end)
-            b:SetScript("OnLeave", function() GameTooltip:Hide() end)
-            b:SetScript("OnClick", function(self)
-                if self.bag == 0 then return end
-                local invID = ContainerIDToInventoryID(self.bag)
-                if CursorHasItem() then PutItemInBag(invID)
-                else PickupBagFromSlot(invID) end
-            end)
-            b:Hide()
-            slotBtns[#slotBtns+1] = b
-        end
-
-        function view.UpdateBagRow()
-            local shown = B.Config().showBagRow
-            for _, b in ipairs(slotBtns) do
-                if shown then
-                    b:Show()
-                    if b.bag == 0 then
-                        b.iconTex:SetTexture("Interface\\Buttons\\Button-Backpack-Up")
-                    else
-                        local tex = GetInventoryItemTexture("player", ContainerIDToInventoryID(b.bag))
-                        b.iconTex:SetTexture(tex or "Interface\\PaperDoll\\UI-PaperDoll-Slot-Bag")
-                        b.iconTex:SetDesaturated(not tex)
-                    end
-                else
-                    b:Hide()
-                end
-            end
-        end
-
-        bagsBtn = B.TitleIconButton(f, B.ASSETS.."Bags",
-            "Show/hide bag slots", function()
-                local cfg = B.Config()
-                cfg.showBagRow = not cfg.showBagRow
-                view.UpdateBagRow()
-            end)
-
-        -- transBtn is hidden by default (Transfers.lua shows it only at
-        -- a merchant/bank with matching items) but its anchor slot is
-        -- always reserved, which left a visible gap in the toolbar
-        -- whenever it wasn't shown. Reflow bagsBtn onto sortBtn directly
-        -- when transBtn is hidden, and back onto transBtn when it
-        -- reappears, instead of always reserving its space.
-        local function RelayoutBagsBtn()
-            bagsBtn:ClearAllPoints()
-            if transBtn:IsShown() then
-                bagsBtn:SetPoint("RIGHT", transBtn, "LEFT", -3, 0)
-            else
-                bagsBtn:SetPoint("RIGHT", sortBtn, "LEFT", -3, 0)
-            end
-        end
-        RelayoutBagsBtn()
-        view.RelayoutBagsBtn = RelayoutBagsBtn
-    else
-        local slotBtns = {}
-        local prev
-        local numSlots = #B.BANK_BAGS - 1
-        for slotNum = 1, numSlots do
-            local bag = 4 + slotNum
-            local b = CreateFrame("Button", f:GetName().."BagSlot"..bag, f)
-            b:SetWidth(28); b:SetHeight(28)
-            if prev then b:SetPoint("LEFT", prev, "RIGHT", 2, 0)
-            else b:SetPoint("BOTTOMLEFT", f, "TOPLEFT", PAD, 1) end
-            prev = b
-            b.bag = bag
-            b.slotNum = slotNum
-            local icon = b:CreateTexture(nil, "BACKGROUND")
-            icon:SetAllPoints()
-            b.iconTex = icon
-            b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
-            b:SetScript("OnEnter", function(self)
-                GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-                local purchased = GetNumBankSlots() or 0
-                if self.slotNum <= purchased then
-                    GameTooltip:SetInventoryItem("player", ContainerIDToInventoryID(self.bag))
-                elseif self.slotNum == purchased + 1 then
-                    GameTooltip:SetText("Buy Bank Bag Slot")
-                    local cost = GetBankSlotCost(purchased)
-                    if cost then SetTooltipMoney(GameTooltip, cost) end
-                else
-                    GameTooltip:SetText("Bank Bag Slot (locked)")
-                    GameTooltip:AddLine("Purchase the previous slot first.", 0.6, 0.6, 0.6, true)
-                end
-                GameTooltip:Show()
-            end)
-            b:SetScript("OnLeave", function() GameTooltip:Hide() end)
-            b:SetScript("OnClick", function(self)
-                local purchased = GetNumBankSlots() or 0
-                if self.slotNum <= purchased then
-                    local invID = ContainerIDToInventoryID(self.bag)
-                    if CursorHasItem() then PutItemInBag(invID)
-                    else PickupBagFromSlot(invID) end
-                elseif self.slotNum == purchased + 1 then
-                    StaticPopup_Show("CONFIRM_BUY_BANK_SLOT")
-                end
-            end)
-            slotBtns[#slotBtns+1] = b
-        end
-
-        function view.UpdateBagRow()
-            local purchased = GetNumBankSlots() or 0
-            for _, b in ipairs(slotBtns) do
-                local tex = b.slotNum <= purchased
-                    and GetInventoryItemTexture("player", ContainerIDToInventoryID(b.bag))
-                    or nil
-                b.iconTex:SetTexture(tex or "Interface\\PaperDoll\\UI-PaperDoll-Slot-Bag")
-                if b.slotNum <= purchased then
-                    b.iconTex:SetDesaturated(not tex)
-                    b.iconTex:SetAlpha(1)
-                elseif b.slotNum == purchased + 1 then
-                    b.iconTex:SetDesaturated(false)
-                    b.iconTex:SetAlpha(0.7)
-                else
-                    b.iconTex:SetDesaturated(true)
-                    b.iconTex:SetAlpha(0.35)
-                end
-            end
-        end
+    if opts and opts.buildBagRow then
+        bagsBtn = opts.buildBagRow(view, f, transBtn, sortBtn)
     end
 
     local function RelayoutFiltersBtn()
         filtersBtn:ClearAllPoints()
         if bagsBtn then
             filtersBtn:SetPoint("RIGHT", bagsBtn, "LEFT", -3, 0)
+        elseif withdrawAllBtn and withdrawAllBtn:IsShown() then
+            filtersBtn:SetPoint("RIGHT", withdrawAllBtn, "LEFT", -3, 0)
         elseif transBtn:IsShown() then
             filtersBtn:SetPoint("RIGHT", transBtn, "LEFT", -3, 0)
         else
@@ -1346,26 +1208,18 @@ local function AddToolbar(view, isBank)
     RelayoutFiltersBtn()
     if isBank then view.RelayoutFiltersBtn = RelayoutFiltersBtn end
 
+    local searchAllBtn = B.TitleIconButton(f, B.ASSETS.."Everything",
+        "Search all characters (Enter in the search box also works)", function()
+            B.SearchEverywhere(view.searchStr)
+        end)
+    searchAllBtn:SetPoint("RIGHT", filtersBtn, "LEFT", -3, 0)
+
     if not isBank then
         local money = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         money:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -(PAD + 4), PAD - 2)
         view.moneyText = money
     end
 end
-
-local function OpenBags()
-    if not bagView then return end
-    bagView.f:Show()
-    Refresh(bagView)
-end
-local function CloseBags()
-    if bagView then bagView.f:Hide() end
-end
-function B.ToggleBags()
-    if not bagView then return end
-    if bagView.f:IsShown() then CloseBags() else OpenBags() end
-end
-B.OpenBags = OpenBags
 
 local function DisableElvUIBags()
     local disabled = false
@@ -1428,36 +1282,6 @@ StaticPopupDialogs["GFBAGS_ELVUI_STILL_ENABLED"] = {
     timeout = 0, whileDead = 1, hideOnEscape = false,
 }
 
-local function HookBagFunctions()
-    if not B.Config().replaceBags then return end
-    _G["ToggleBackpack"] = B.ToggleBags
-    _G["OpenBackpack"]   = OpenBags
-    _G["CloseBackpack"]  = CloseBags
-    _G["OpenAllBags"]    = B.ToggleBags
-    _G["CloseAllBags"]   = CloseBags
-    _G["ToggleBag"]      = B.ToggleBags
-end
-
-local function HideBlizzardBank()
-    if B.Config().replaceBank and BankFrame then
-        -- Hide() would trigger OnHide -> CloseBankFrame(), ending the bank
-        -- interaction server-side, so keep it shown but pin it off-screen.
-        local repositioning = false
-        local function PushOffscreen(f)
-            if repositioning then return end
-            repositioning = true
-            f:ClearAllPoints()
-            f:SetPoint("CENTER", UIParent, "CENTER", 10000, 10000)
-            repositioning = false
-        end
-        BankFrame:HookScript("OnShow", PushOffscreen)
-        hooksecurefunc(BankFrame, "SetPoint", function(f)
-            if not repositioning then PushOffscreen(f) end
-        end)
-        Log("Blizzard bank moved off-screen")
-    end
-end
-
 local evt = CreateFrame("Frame")
 evt:RegisterEvent("PLAYER_LOGIN")
 evt:RegisterEvent("PLAYER_ENTERING_WORLD")
@@ -1475,30 +1299,31 @@ local DIRTY_DEBOUNCE_TIME = 0.2
 local expireTick = 0
 local resizeTick = 0
 evt:SetScript("OnUpdate", function(self, elapsed)
+    local bagView, bankView = B.bagView, B.bankView
     if not bagView then return end
     expireTick = expireTick + (elapsed or 0)
     if expireTick > 5 then
         expireTick = 0
-        if ExpireRecent() then dirty = true; dirtyDebounce = 0 end
+        if B.ExpireRecent() then dirty = true; dirtyDebounce = 0 end
     end
     if dirty then
         dirtyDebounce = dirtyDebounce + (elapsed or 0)
         if dirtyDebounce >= DIRTY_DEBOUNCE_TIME then
             dirty = false
             dirtyDebounce = 0
-            Guard("UpdateRecent", UpdateRecent)
+            Guard("UpdateRecent", B.UpdateRecent)
             B.WipeTmogCache()
-            Refresh(bagView)
-            Refresh(bankView)
+            B.RefreshView(bagView)
+            B.RefreshView(bankView)
         end
     end
 
-    if bagView.resizeDirty or bankView.resizeDirty then
+    if bagView.resizeDirty or (bankView and bankView.resizeDirty) then
         resizeTick = resizeTick + (elapsed or 0)
         if resizeTick > 0.1 then
             resizeTick = 0
-            if bagView.resizeDirty  then bagView.resizeDirty  = nil; Refresh(bagView)  end
-            if bankView.resizeDirty then bankView.resizeDirty = nil; Refresh(bankView) end
+            if bagView.resizeDirty  then bagView.resizeDirty  = nil; B.RefreshView(bagView)  end
+            if bankView and bankView.resizeDirty then bankView.resizeDirty = nil; B.RefreshView(bankView) end
         end
     end
 end)
@@ -1510,31 +1335,9 @@ evt:SetScript("OnEvent", function(self, event)
             WIDTH = PAD * 2 + 12 * (BTN + BTN_PAD)
             Log("Init: Config ok")
 
-            HookBagFunctions()
-            HideBlizzardBank()
-            Log("Init: hooks ok")
-
-            local me = UnitName("player")
-            bagView  = CreateView("GrimfallBagsBackpack",
-                                  me.." - "..(BACKPACK_TOOLTIP or "Backpack"), B.PLAYER_BAGS)
-            bankView = CreateView("GrimfallBagsBank",
-                                  me.." - "..(BANK or "Bank"), B.BANK_BAGS)
-            B.bagView, B.bankView = bagView, bankView
+            B.BuildBagView()
+            B.BuildBankView()
             Log("Init: views created")
-
-            AddToolbar(bagView, false)
-            AddToolbar(bankView, true)
-            Log("Init: toolbars ok")
-
-            RefreshCurrencyRow(bagView)
-            Log("Init: currency row ok")
-
-            B.RestorePosition(bagView.f, "GrimfallBagsBackpack",
-                {"BOTTOMRIGHT", UIParent, "BOTTOMRIGHT", -50, 100})
-            B.RestorePosition(bankView.f, "GrimfallBagsBank",
-                {"TOPLEFT", UIParent, "TOPLEFT", 50, -104})
-            B.RestoreWidth(bagView.f, "GrimfallBagsBackpack", WIDTH)
-            B.RestoreWidth(bankView.f, "GrimfallBagsBank", WIDTH)
 
             local ecfg = B.Config()
             if IsAddOnLoaded("ElvUI") and not ecfg.elvuiPromptShown then
@@ -1544,7 +1347,7 @@ evt:SetScript("OnEvent", function(self, event)
                 StaticPopup_Show("GFBAGS_ELVUI_STILL_ENABLED")
             end
 
-            LoadRecentState()
+            B.LoadRecentState()
             Log("Init: recent-item state loaded")
 
             B.SeedDefaultCategories()
@@ -1557,7 +1360,7 @@ evt:SetScript("OnEvent", function(self, event)
         print("|cff33aaff[GrimfallBags]|r loaded  |cffffcc00/gfbags|r opens it, /gfbags log shows the log.")
 
     elseif event == "PLAYER_ENTERING_WORLD" then
-        Guard("ReassertBagHooks", HookBagFunctions)
+        Guard("ReassertBagHooks", B.HookBagFunctions)
 
     elseif event == "BAG_UPDATE" or event == "ITEM_LOCK_CHANGED"
         or event == "BAG_UPDATE_COOLDOWN" or event == "PLAYERBANKSLOTS_CHANGED" then
@@ -1565,22 +1368,18 @@ evt:SetScript("OnEvent", function(self, event)
         dirtyDebounce = 0
 
     elseif event == "CURRENCY_DISPLAY_UPDATE" then
-        Guard("RefreshCurrency", RefreshCurrencyRow, bagView)
+        Guard("RefreshCurrency", B.RefreshCurrencyRow, B.bagView)
 
     elseif event == "BANKFRAME_OPENED" then
-        if bankView then
-            bankView.f:Show()
-            Refresh(bankView)
+        if B.bankView then
+            B.bankView.f:Show()
+            B.RefreshView(B.bankView)
         end
-        OpenBags()
+        B.OpenBags()
         if B.UpdateTransferButtons then B.UpdateTransferButtons() end
 
     elseif event == "BANKFRAME_CLOSED" then
-        if bankView then bankView.f:Hide() end
+        if B.bankView then B.bankView.f:Hide() end
         if B.UpdateTransferButtons then B.UpdateTransferButtons() end
     end
 end)
-
-S.OnDataChanged = function(what)
-    if what == "guild" and B.RefreshGuildBank then B.RefreshGuildBank() end
-end

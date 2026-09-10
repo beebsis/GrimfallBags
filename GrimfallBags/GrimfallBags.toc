@@ -2,19 +2,26 @@
 ## Title: Grimfall Bags
 ## Notes: Bags/Bank/Guild Bank in category or single-list view | WoW 3.3.5a / Grimfall
 ## Author: Beebsis
-## Version: 1.3.0
+## Version: 2.0.0
 ## RequiredDeps: Syndicator335
 ## SavedVariables: GrimfallBagsConfig
 
-Core.lua
-WindowChrome.lua
-ElvUISkin.lua
-IOWindow.lua
-Profiles.lua
-Json.lua
-Categories.lua
-Views.lua
-GuildBank.lua
-Sorting.lua
-Transfers.lua
-Options.lua
+Core\Core.lua
+Core\WindowChrome.lua
+Compatibility\ElvUISkin.lua
+ViewManagement\IOWindow.lua
+SingleViews\SearchWindow.lua
+ViewManagement\Profiles.lua
+Embeds\Json.lua
+CustomiseDialog\Categories.lua
+ItemViewCommon\ViewShared.lua
+SingleViews\BagView.lua
+SingleViews\BankView.lua
+API\GuildBankAPI.lua
+Sorting\Sorting.lua
+Sorting\SortManager.lua
+Transfers\Transfers.lua
+Transfers\TransferManager.lua
+CategoryViews\GuildBankView.xml
+CategoryViews\GuildBankView.lua
+CustomiseDialog\Options.lua

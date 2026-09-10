@@ -12,7 +12,7 @@ local function GetElvSkins()
             if ok and mod then elvSkins = mod end
         end
     end
-    return B.Config().elvuiSkin and elvSkins or nil
+    return (B.Config().skin == "elvui") and elvSkins or nil
 end
 
 local function TryElvSkin(method, ...)

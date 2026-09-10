@@ -54,6 +54,7 @@ local function BuildIOWindow()
     local sf = CreateFrame("ScrollFrame", "GrimfallBagsIOWindowScroll", w, "UIPanelScrollFrameTemplate")
     sf:SetBackdrop(B.PANEL_BD)
     sf:SetBackdropColor(0, 0, 0, 0.4)
+    sf:SetBackdropBorderColor(unpack(B.COLOR_BORDER))
     sf:EnableMouse(true)
     w.scroll = sf
     B.SkinScrollBar(_G[sf:GetName().."ScrollBar"])

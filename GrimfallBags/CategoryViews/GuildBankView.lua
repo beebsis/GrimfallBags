@@ -2,95 +2,113 @@ local B = GrimfallBags
 local S = Syndicator335
 local Log, Guard = B.Log, B.Guard
 
-local GB_COLS   = 14
-local GB_SLOTS  = 98
-local BTN       = 37
-local BTN_PAD   = 2
-local PAD       = 10
+B.GuildBankView = {}
+
+local GB_COLS = 14
+local BTN     = 37
+local BTN_PAD = 2
+local PAD     = 10
 
 local frame
 local buttons = {}
 local currentTab = 1
 local atGuildBank = false
 local gbResizeDirty = false
+local initialized = false
 
-local function Build()
-    local w = CreateFrame("Frame", "GrimfallBagsGuildBank", UIParent)
-    local width = PAD * 2 + GB_COLS * (BTN + BTN_PAD)
-    w:SetWidth(width)
-    w:SetHeight(120 + math.ceil(GB_SLOTS / GB_COLS) * (BTN + BTN_PAD))
-    B.MakeMovable(w, "GrimfallBagsGuildBank")
-    B.MakeResizable(w, "GrimfallBagsGuildBank", PAD * 2 + 4 * (BTN + BTN_PAD), function()
+local SEARCH_ROW_Y = -(PAD + 18 + 36 + 4)
+
+B.GuildBankView.IsOpen = function() return atGuildBank end
+
+local function Initialize()
+    if initialized then return end
+    frame = _G["GrimfallBagsGuildBank"]
+    if not frame then return end
+    initialized = true
+
+    B.MakeMovable(frame, "GrimfallBagsGuildBank")
+    B.MakeResizable(frame, "GrimfallBagsGuildBank", PAD * 2 + 4 * (BTN + BTN_PAD), function()
         gbResizeDirty = true
     end)
-    B.RestoreWidth(w, "GrimfallBagsGuildBank", width)
-    w:SetFrameStrata("HIGH")
-    B.StyleWindow(w)
-    w:Hide()
+    B.RestoreWidth(frame, "GrimfallBagsGuildBank", PAD * 2 + GB_COLS * (BTN + BTN_PAD))
+    B.StyleWindow(frame)
     tinsert(UISpecialFrames, "GrimfallBagsGuildBank")
-    frame = w
 
-    w.title = w:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    w.title:SetPoint("TOP", w, "TOP", 0, -(PAD - 2))
-    w.title:SetText(GUILD_BANK or "Guild Bank")
+    frame.title = _G["GrimfallBagsGuildBankTitle"]
+    frame.moneyText = _G["GrimfallBagsGuildBankMoney"]
+    frame.depositBtn = _G["GrimfallBagsGuildBankDepositBtn"]
+    frame.withdrawBtn = _G["GrimfallBagsGuildBankWithdrawBtn"]
+    frame.sortBtn = _G["GrimfallBagsGuildBankSortBtn"]
 
-    local xb = CreateFrame("Button", nil, w, "UIPanelCloseButton")
-    xb:SetPoint("TOPRIGHT", w, "TOPRIGHT", 2, 2)
-    B.SkinClose(xb)
+    B.SkinClose(_G["GrimfallBagsGuildBankClose"])
 
-    local viewBtn = B.TitleIconButton(w, B.ASSETS.."GuildTabText",
-        "Switch view (category/grid)", function()
-            local cfg = B.Config()
-            cfg.gbCategoryView = not cfg.gbCategoryView
-            B.RefreshGuildBank()
-        end)
-    viewBtn:SetPoint("TOPRIGHT", w, "TOPRIGHT", -28, -(PAD - 2))
+    frame.title:SetText(GUILD_BANK or "Guild Bank")
+    frame.depositBtn:SetText(GUILDBANK_DEPOSIT_BUTTON or "Deposit")
+    frame.withdrawBtn:SetText(GUILDBANK_WITHDRAW_BUTTON or "Withdraw")
+    B.SkinButton(frame.depositBtn)
+    B.SkinButton(frame.withdrawBtn)
 
-    local sortBtn = B.TitleIconButton(w, B.ASSETS.."Sorting",
-        "Aktuellen Tab sortieren", function()
-            if atGuildBank then B.StartGuildBankSort() end
-        end)
-    sortBtn:SetPoint("RIGHT", viewBtn, "LEFT", -3, 0)
-    w.sortBtn = sortBtn
+    local viewBtn = _G["GrimfallBagsGuildBankViewBtn"]
+    B.SkinButton(viewBtn)
+    viewBtn:SetScript("OnClick", function()
+        local cfg = B.Config()
+        cfg.gbCategoryView = not cfg.gbCategoryView
+        B.GuildBankView.Refresh()
+    end)
+    viewBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText("Switch view (category/grid)")
+        GameTooltip:Show()
+    end)
+    viewBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-    w.headers = {}
-    w.nHdr = 0
-    function w.AcquireHeader()
-        w.nHdr = w.nHdr + 1
-        local h = w.headers[w.nHdr]
+    local sortBtn = frame.sortBtn
+    sortBtn.icon = _G["GrimfallBagsGuildBankSortBtnIcon"]
+    B.SkinButton(sortBtn)
+    sortBtn:SetScript("OnClick", function()
+        if atGuildBank then B.SortManager.Start(currentTab) end
+    end)
+    sortBtn:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_TOP")
+        GameTooltip:SetText("Aktuellen Tab sortieren")
+        GameTooltip:Show()
+    end)
+    sortBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    frame.depositBtn:SetScript("OnClick", function() B.TransferManager.ShowDeposit() end)
+    frame.withdrawBtn:SetScript("OnClick", function() B.TransferManager.ShowWithdraw() end)
+
+    frame.headers = {}
+    frame.nHdr = 0
+    function frame.AcquireHeader()
+        frame.nHdr = frame.nHdr + 1
+        local h = frame.headers[frame.nHdr]
         if not h then
-            h = w:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            h:SetTextColor(1, 0.82, 0)
-            w.headers[w.nHdr] = h
+            h = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+            h:SetTextColor(unpack(B.COLOR_ACCENT))
+            frame.headers[frame.nHdr] = h
         end
         h:Show()
         return h
     end
 
-    w.tabBtns = {}
+    frame.tabBtns = {}
     for t = 1, 6 do
-        local tb = CreateFrame("Button", "GrimfallBagsGBTab"..t, w)
+        local tb = CreateFrame("Button", "GrimfallBagsGBTab"..t, frame, "GrimfallBagsGBTabButtonTemplate")
         tb:SetWidth(32); tb:SetHeight(32)
-        if t == 1 then tb:SetPoint("TOPLEFT", w, "TOPLEFT", PAD, -(PAD + 18))
-        else tb:SetPoint("LEFT", w.tabBtns[t-1], "RIGHT", 4, 0) end
-        local icon = tb:CreateTexture(nil, "BACKGROUND")
-        icon:SetAllPoints()
-        tb.icon = icon
-        local sel = tb:CreateTexture(nil, "OVERLAY")
-        sel:SetAllPoints()
-        sel:SetTexture("Interface\\Buttons\\CheckButtonHilight")
-        sel:SetBlendMode("ADD")
-        sel:Hide()
-        tb.sel = sel
-        tb:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+        if t == 1 then tb:SetPoint("TOPLEFT", frame, "TOPLEFT", PAD, -(PAD + 18))
+        else tb:SetPoint("LEFT", frame.tabBtns[t-1], "RIGHT", 4, 0) end
+        tb.icon = _G["GrimfallBagsGBTab"..t.."Icon"]
+        tb.sel  = _G["GrimfallBagsGBTab"..t.."Sel"]
+        if tb.sel then tb.sel:SetBlendMode("ADD"); tb.sel:Hide() end
         tb.tab = t
         tb:SetScript("OnClick", function(self)
             currentTab = self.tab
             if atGuildBank then
-                SetCurrentGuildBankTab(self.tab)
-                QueryGuildBankTab(self.tab)
+                B.GuildBankAPI.SetCurrentTab(self.tab)
+                B.GuildBankAPI.QueryTab(self.tab)
             end
-            B.RefreshGuildBank()
+            B.GuildBankView.Refresh()
         end)
         tb:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
@@ -99,33 +117,35 @@ local function Build()
         end)
         tb:SetScript("OnLeave", function() GameTooltip:Hide() end)
         tb:Hide()
-        w.tabBtns[t] = tb
+        frame.tabBtns[t] = tb
     end
 
-    local gridTop = -(PAD + 18 + 36 + 4)
-    for i = 1, GB_SLOTS do
-        local btn = CreateFrame("Button", "GrimfallBagsGBItem"..i, w, "ItemButtonTemplate")
+    local gridTop = SEARCH_ROW_Y - B.SearchChromeExtra()
+    for i = 1, B.GuildBankAPI.NUM_SLOTS do
+        local btn = CreateFrame("Button", "GrimfallBagsGBItem"..i, frame, "GrimfallBagsGBItemButtonTemplate")
         btn:SetWidth(BTN); btn:SetHeight(BTN)
         local col = (i - 1) % GB_COLS
         local row = math.floor((i - 1) / GB_COLS)
-        btn:SetPoint("TOPLEFT", w, "TOPLEFT",
+        btn:SetPoint("TOPLEFT", frame, "TOPLEFT",
                      PAD + col * (BTN + BTN_PAD), gridTop - row * (BTN + BTN_PAD))
         btn.slot = i
+        btn.qborder = _G["GrimfallBagsGBItem"..i.."QBorder"]
+        if btn.qborder then btn.qborder:SetBlendMode("ADD"); btn.qborder:Hide() end
         btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         btn:RegisterForDrag("LeftButton")
         btn:SetScript("OnClick", function(self, mouse)
             if not atGuildBank then return end
             if mouse == "RightButton" then
-                AutoStoreGuildBankItem(currentTab, self.slot)
+                B.GuildBankAPI.AutoStoreItem(currentTab, self.slot)
             else
-                PickupGuildBankItem(currentTab, self.slot)
+                B.GuildBankAPI.PickupItem(currentTab, self.slot)
             end
         end)
         btn:SetScript("OnDragStart", function(self)
-            if atGuildBank then PickupGuildBankItem(currentTab, self.slot) end
+            if atGuildBank then B.GuildBankAPI.PickupItem(currentTab, self.slot) end
         end)
         btn:SetScript("OnReceiveDrag", function(self)
-            if atGuildBank then PickupGuildBankItem(currentTab, self.slot) end
+            if atGuildBank then B.GuildBankAPI.PickupItem(currentTab, self.slot) end
         end)
         btn:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -147,59 +167,34 @@ local function Build()
         buttons[i] = btn
     end
 
-    w.moneyText = w:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    w.moneyText:SetPoint("BOTTOMRIGHT", w, "BOTTOMRIGHT", -(PAD + 4), PAD)
+    local searchFilter = B.BuildSearchFilter(frame, frame, function()
+        B.GuildBankView.Refresh()
+    end, "GrimfallBagsGuildBank", SEARCH_ROW_Y)
+    frame.searchFilter = searchFilter
 
-    w.depositBtn = CreateFrame("Button", nil, w, "UIPanelButtonTemplate")
-    w.depositBtn:SetWidth(90); w.depositBtn:SetHeight(20)
-    w.depositBtn:SetPoint("BOTTOMLEFT", w, "BOTTOMLEFT", PAD, PAD - 2)
-    w.depositBtn:SetText(GUILDBANK_DEPOSIT_BUTTON or "Deposit")
-    w.depositBtn:SetScript("OnClick", function()
-        StaticPopup_Show("GFBAGS_GB_DEPOSIT")
-    end)
-    B.SkinButton(w.depositBtn)
+    local searchBtn = B.TitleIconButton(frame, B.ASSETS.."Search",
+        "Show/hide search & filters", function()
+            B.ToggleSearchFilters()
+        end)
+    searchBtn:SetPoint("RIGHT", sortBtn, "LEFT", -3, 0)
 
-    w.withdrawBtn = CreateFrame("Button", nil, w, "UIPanelButtonTemplate")
-    w.withdrawBtn:SetWidth(90); w.withdrawBtn:SetHeight(20)
-    w.withdrawBtn:SetPoint("LEFT", w.depositBtn, "RIGHT", 6, 0)
-    w.withdrawBtn:SetText(GUILDBANK_WITHDRAW_BUTTON or "Withdraw")
-    w.withdrawBtn:SetScript("OnClick", function()
-        StaticPopup_Show("GFBAGS_GB_WITHDRAW")
-    end)
-    B.SkinButton(w.withdrawBtn)
+    local depositBtn = B.TitleIconButton(frame, B.ASSETS.."Transfer",
+        "Deposit matching items into this tab", function()
+            B.DepositGuildMatching(frame.searchStr)
+        end)
+    depositBtn:SetPoint("RIGHT", searchBtn, "LEFT", -3, 0)
+    depositBtn:Hide()
+    frame.depositItemsBtn = depositBtn
 end
 
-StaticPopupDialogs["GFBAGS_GB_DEPOSIT"] = {
-    text = (GUILDBANK_DEPOSIT_BUTTON or "Deposit").." (Gold):",
-    button1 = ACCEPT or "Accept", button2 = CANCEL or "Cancel",
-    hasEditBox = 1, maxLetters = 8,
-    OnAccept = function(self)
-        local g = tonumber(_G[self:GetName().."EditBox"]:GetText())
-        if g and g > 0 then GuildBankDepositMoney(g * 10000) end
-    end,
-    EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
-    timeout = 0, whileDead = 1, hideOnEscape = 1,
-}
-StaticPopupDialogs["GFBAGS_GB_WITHDRAW"] = {
-    text = (GUILDBANK_WITHDRAW_BUTTON or "Withdraw").." (Gold):",
-    button1 = ACCEPT or "Accept", button2 = CANCEL or "Cancel",
-    hasEditBox = 1, maxLetters = 8,
-    OnAccept = function(self)
-        local g = tonumber(_G[self:GetName().."EditBox"]:GetText())
-        if g and g > 0 then WithdrawGuildBankMoney(g * 10000) end
-    end,
-    EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
-    timeout = 0, whileDead = 1, hideOnEscape = 1,
-}
-
-function B.RefreshGuildBank()
+function B.GuildBankView.Refresh()
     if not (frame and frame:IsShown()) then return end
-    Guard("RefreshGuildBank", function()
+    Guard("GuildBankView.Refresh", function()
         GB_COLS = math.max(1, math.floor((frame:GetWidth() - PAD * 2 + BTN_PAD) / (BTN + BTN_PAD)))
 
         local guild = S.Guild()
 
-        local numTabs = atGuildBank and (GetNumGuildBankTabs() or 0) or 0
+        local numTabs = atGuildBank and B.GuildBankAPI.GetNumTabs() or 0
         if not atGuildBank and guild then
             for t in pairs(guild.tabs or {}) do
                 if t > numTabs then numTabs = t end
@@ -209,7 +204,7 @@ function B.RefreshGuildBank()
             if t <= numTabs then
                 local name, icon
                 if atGuildBank then
-                    name, icon = GetGuildBankTabInfo(t)
+                    name, icon = B.GuildBankAPI.GetTabInfo(t)
                 elseif guild and guild.tabs[t] then
                     name = guild.tabs[t].name
                 end
@@ -224,15 +219,15 @@ function B.RefreshGuildBank()
 
         local gname = GetGuildInfo("player") or (GUILD or "Guild")
         frame.title:SetText(atGuildBank and (gname.." - "..(GUILD_BANK or "Guild Bank"))
-            or ("|cffaaaaff"..gname.." - "..(GUILD_BANK or "Guild Bank").."  (Cache)|r"))
+            or (gname.." - "..(GUILD_BANK or "Guild Bank").."  (Cache)"))
 
         local cachedTab = guild and guild.tabs and guild.tabs[currentTab]
         local entries = {}
-        for i = 1, GB_SLOTS do
+        for i = 1, B.GuildBankAPI.NUM_SLOTS do
             local link, tex, cnt
             if atGuildBank then
-                link = GetGuildBankItemLink(currentTab, i)
-                tex, cnt = GetGuildBankItemInfo(currentTab, i)
+                link = B.GuildBankAPI.GetItemLink(currentTab, i)
+                tex, cnt = B.GuildBankAPI.GetSlotInfo(currentTab, i)
             elseif cachedTab and cachedTab[i] then
                 link = cachedTab[i].l
                 tex  = cachedTab[i].t
@@ -241,25 +236,24 @@ function B.RefreshGuildBank()
             entries[i] = {l=link, t=tex, c=cnt}
         end
 
+        local query = (frame.searchStr or ""):lower()
         local function Fill(btn, e)
             btn.link = e.l
             SetItemButtonTexture(btn, e.t)
             SetItemButtonCount(btn, e.c)
             local quality = e.l and select(3, GetItemInfo(e.l))
-            if not btn.qborder then
-                local t = btn:CreateTexture(nil, "OVERLAY")
-                t:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
-                t:SetBlendMode("ADD")
-                t:SetWidth(BTN * 1.7); t:SetHeight(BTN * 1.7)
-                t:SetPoint("CENTER")
-                btn.qborder = t
-            end
+            local qborder = btn.qborder
             if quality and quality > 1 then
                 local r, g, bcol = GetItemQualityColor(quality)
-                btn.qborder:SetVertexColor(r, g, bcol, 0.8)
-                btn.qborder:Show()
+                qborder:SetVertexColor(r, g, bcol, 0.8)
+                qborder:Show()
             else
-                btn.qborder:Hide()
+                qborder:Hide()
+            end
+            if e.l and query ~= "" then
+                btn:SetAlpha(S.Search.Matches({l=e.l, c=e.c}, query) and 1 or 0.25)
+            else
+                btn:SetAlpha(1)
             end
         end
 
@@ -268,7 +262,7 @@ function B.RefreshGuildBank()
 
         frame.sortBtn.icon:SetDesaturated(not atGuildBank)
 
-        local gridTop = -(PAD + 18 + 36 + 4)
+        local gridTop = SEARCH_ROW_Y - B.SearchChromeExtra()
         if not B.Config().gbCategoryView then
             for i, btn in ipairs(buttons) do
                 local col = (i - 1) % GB_COLS
@@ -279,10 +273,10 @@ function B.RefreshGuildBank()
                              gridTop - row * (BTN + BTN_PAD))
                 Fill(btn, entries[i])
             end
-            frame:SetHeight(120 + math.ceil(GB_SLOTS / GB_COLS) * (BTN + BTN_PAD))
+            frame:SetHeight(120 + B.SearchChromeExtra() + math.ceil(B.GuildBankAPI.NUM_SLOTS / GB_COLS) * (BTN + BTN_PAD))
         else
             local groups, order = {}, {}
-            for i = 1, GB_SLOTS do
+            for i = 1, B.GuildBankAPI.NUM_SLOTS do
                 local e = entries[i]
                 local cat
                 if e.l then
@@ -352,7 +346,7 @@ function B.RefreshGuildBank()
             frame:SetHeight(-y + 40)
         end
 
-        local money = atGuildBank and GetGuildBankMoney() or (guild and guild.money)
+        local money = atGuildBank and B.GuildBankAPI.GetMoney() or (guild and guild.money)
         frame.moneyText:SetText(B.MoneyString(money))
         if atGuildBank then
             frame.depositBtn:Show()
@@ -360,6 +354,9 @@ function B.RefreshGuildBank()
         else
             frame.depositBtn:Hide()
             frame.withdrawBtn:Hide()
+        end
+        if frame.depositItemsBtn then
+            if atGuildBank then frame.depositItemsBtn:Show() else frame.depositItemsBtn:Hide() end
         end
 
         local owner = GameTooltip:IsShown() and GameTooltip:GetOwner()
@@ -370,90 +367,24 @@ function B.RefreshGuildBank()
     end)
 end
 
-function B.ToggleGuildBank()
-    if not frame then Build() end
+function B.GuildBankView.Toggle()
+    Initialize()
+    if not frame then return end
     if frame:IsShown() then
         frame:Hide()
     else
         frame:Show()
-        B.RefreshGuildBank()
+        B.GuildBankView.Refresh()
     end
 end
 
-local gbSorter = CreateFrame("Frame")
-gbSorter:Hide()
-
-local function GBSortStep()
-    if not atGuildBank then return false end
-    local tab = currentTab
-    local slots = {}
-    for i = 1, GB_SLOTS do
-        local _, cnt, locked = GetGuildBankItemInfo(tab, i)
-        if locked then return true end
-        local link = GetGuildBankItemLink(tab, i)
-        slots[#slots+1] = {
-            slot = i, link = link, id = S.ItemID(link), count = cnt or 0,
-            max = link and (select(8, GetItemInfo(link)) or 1) or 1,
-        }
+function B.OpenGuildBank()
+    Initialize()
+    if not frame then return end
+    if not frame:IsShown() then
+        frame:Show()
+        B.GuildBankView.Refresh()
     end
-
-    local partial = {}
-    for _, s in ipairs(slots) do
-        if s.id and s.count < s.max then
-            local o = partial[s.id]
-            if o then
-                PickupGuildBankItem(tab, o.slot)
-                PickupGuildBankItem(tab, s.slot)
-                return true
-            end
-            partial[s.id] = s
-        end
-    end
-
-    local items = {}
-    for _, s in ipairs(slots) do
-        if s.link then items[#items+1] = s end
-    end
-    table.sort(items, function(a, b)
-        local ka, kb = B.SortKey(a.link), B.SortKey(b.link)
-        if ka ~= kb then return ka < kb end
-        if a.count ~= b.count then return a.count > b.count end
-        return false
-    end)
-    for pos, want in ipairs(items) do
-        if want.slot ~= pos then
-            PickupGuildBankItem(tab, want.slot)
-            PickupGuildBankItem(tab, pos)
-            return true
-        end
-    end
-    return false
-end
-
-gbSorter:SetScript("OnUpdate", function(self, elapsed)
-    self.t = (self.t or 0) + (elapsed or 0)
-    if self.t < 0.25 then return end
-    self.t = 0
-    if CursorHasItem() then return end
-    self.steps = (self.steps or 0) + 1
-    if self.steps > 300 then
-        Log("GB sort aborted (too many steps)")
-        self:Hide()
-        return
-    end
-    local ok, more = pcall(GBSortStep)
-    if not ok or not more then
-        if not ok then Log("ERROR during GB sort: "..tostring(more)) end
-        self:Hide()
-        Log("GB sort finished ("..(self.steps or 0).." steps)")
-    end
-end)
-
-function B.StartGuildBankSort()
-    if gbSorter:IsShown() or not atGuildBank then return end
-    gbSorter.t, gbSorter.steps = 0, 0
-    gbSorter:Show()
-    Log("GB sort started (tab "..currentTab..")")
 end
 
 local resizeTicker = CreateFrame("Frame")
@@ -463,7 +394,7 @@ resizeTicker:SetScript("OnUpdate", function(self, elapsed)
     if self.t < 0.1 then return end
     self.t = 0
     gbResizeDirty = false
-    B.RefreshGuildBank()
+    B.GuildBankView.Refresh()
 end)
 
 local queryQueue = {}
@@ -475,7 +406,7 @@ queryTimer:SetScript("OnUpdate", function(self, elapsed)
     self.t = 0
     local tab = table.remove(queryQueue, 1)
     if tab and atGuildBank then
-        QueryGuildBankTab(tab)
+        B.GuildBankAPI.QueryTab(tab)
         Log("QueryGuildBankTab("..tab..")")
     end
     if #queryQueue == 0 then self:Hide() end
@@ -483,7 +414,7 @@ end)
 
 local function QueueTabQueries()
     wipe(queryQueue)
-    for tab = 1, GetNumGuildBankTabs() or 0 do
+    for tab = 1, B.GuildBankAPI.GetNumTabs() do
         queryQueue[#queryQueue+1] = tab
     end
     queryTimer.t = 0.5
@@ -500,30 +431,45 @@ evt:RegisterEvent("ADDON_LOADED")
 evt:SetScript("OnEvent", function(self, event, arg1)
     if event == "GUILDBANKFRAME_OPENED" then
         atGuildBank = true
-        if not frame then Build() end
+        Initialize()
+        if not frame then return end
         B.RestorePosition(frame, "GrimfallBagsGuildBank",
             {"TOPLEFT", UIParent, "TOPLEFT", 40, -80})
         frame:Show()
-        currentTab = GetCurrentGuildBankTab() or 1
+        currentTab = B.GuildBankAPI.GetCurrentTab()
         QueueTabQueries()
-        B.RefreshGuildBank()
+        B.GuildBankView.Refresh()
         Log("Guild bank opened (live)")
 
     elseif event == "GUILDBANKFRAME_CLOSED" then
         atGuildBank = false
+        B.SortManager.Stop()
         queryTimer:Hide()
         if frame then frame:Hide() end
 
     elseif event == "GUILDBANKBAGSLOTS_CHANGED" or event == "GUILDBANK_UPDATE_MONEY" then
-        B.RefreshGuildBank()
+        B.GuildBankView.Refresh()
 
     elseif event == "ADDON_LOADED" and arg1 == "Blizzard_GuildBankUI" then
         if B.Config().replaceGuildBank and GuildBankFrame then
-            GuildBankFrame:HookScript("OnShow", function(f)
-                f:SetAlpha(0)
-                f:EnableMouse(false)
+            local repositioning = false
+            local function PushOffscreen(f)
+                if repositioning then return end
+                repositioning = true
+                f:ClearAllPoints()
+                f:SetPoint("CENTER", UIParent, "CENTER", 10000, 10000)
+                repositioning = false
+            end
+            GuildBankFrame:HookScript("OnShow", PushOffscreen)
+            hooksecurefunc(GuildBankFrame, "SetPoint", function(f)
+                if not repositioning then PushOffscreen(f) end
             end)
-            Log("Blizzard guild bank made invisible")
+            Log("Blizzard guild bank moved off-screen")
         end
     end
 end)
+
+S.OnDataChanged = function(what)
+    if what == "guild" then B.GuildBankView.Refresh() end
+    if B.InvalidateCrossCharCounts then B.InvalidateCrossCharCounts() end
+end
