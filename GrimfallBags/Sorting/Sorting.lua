@@ -67,7 +67,6 @@ local function SortStep(st, bags)
                 id = S.ItemID(link), count = count or 0,
                 max = link and (select(8, GetItemInfo(link)) or 1) or 1,
                 key = link and B.SortKey(link) or nil,
-                ignored = B.IsSlotIgnored(bag, slot),
             }
         end
     end
@@ -93,7 +92,7 @@ local function SortStep(st, bags)
 
     local partial = {}
     for _, s in ipairs(slots) do
-        if not s.ignored and s.id and s.count < s.max and not st.badMergeIds[s.id] then
+        if s.id and s.count < s.max and not st.badMergeIds[s.id] then
             local o = partial[s.id]
             if o then
                 st.lastMerge = {
@@ -113,7 +112,7 @@ local function SortStep(st, bags)
 
     local items = {}
     for _, s in ipairs(slots) do
-        if s.link and not s.ignored then items[#items+1] = s end
+        if s.link then items[#items+1] = s end
     end
     table.sort(items, function(a, b)
         if a.key ~= b.key then return a.key < b.key end
@@ -123,7 +122,7 @@ local function SortStep(st, bags)
 
     local targets = {}
     for _, s in ipairs(slots) do
-        if not s.ignored then targets[#targets+1] = s end
+        targets[#targets+1] = s
     end
 
     local pos = 1

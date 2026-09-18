@@ -98,6 +98,15 @@ local function BuildGeneralTab(c)
     PlaceLeft(MakeCheck(c, "Show cross-character count on items (bags + bank + mail)",
         function() return cfg.showCrossCharCount end,
         function(v) cfg.showCrossCharCount = v end))
+    PlaceLeft(MakeCheck(c, "Show item ID in tooltips",
+        function() return cfg.showItemID end,
+        function(v) cfg.showItemID = v end))
+    PlaceLeft(MakeCheck(c, "Show item tags in tooltips",
+        function() return cfg.showTags end,
+        function(v) cfg.showTags = v end))
+    PlaceLeft(MakeCheck(c, "Show category in tooltips",
+        function() return cfg.showCategory end,
+        function(v) cfg.showCategory = v end))
     PlaceLeft(MakeCheck(c, "Merge stacks",
         function() return cfg.mergeStacks end,
         function(v) cfg.mergeStacks = v end))
