@@ -12,12 +12,12 @@ local function DoAutoRepair()
 
     if type(CanGuildBankRepair) == "function" and CanGuildBankRepair() then
         RepairAllItems(true)
-        print("|cff33aaff[GrimfallBags]|r Auto-repaired for "..B.MoneyString(cost).." (guild funds).")
+        print("|cff33aaff[GrimfallBags]|r Repaired all items: -"..B.MoneyString(cost).." (guild funds).")
     elseif GetMoney() >= cost then
         RepairAllItems(false)
-        print("|cff33aaff[GrimfallBags]|r Auto-repaired for "..B.MoneyString(cost)..".")
+        print("|cff33aaff[GrimfallBags]|r Repaired all items: -"..B.MoneyString(cost)..".")
     else
-        print("|cff33aaff[GrimfallBags]|r Auto-repair skipped - need "..B.MoneyString(cost)..".")
+        print("|cff33aaff[GrimfallBags]|r Repair skipped (need "..B.MoneyString(cost)..").")
     end
 end
 
@@ -89,6 +89,7 @@ runner:SetScript("OnUpdate", function(self, elapsed)
                 local _, _, locked = GetContainerItemInfo(it.bag, it.slot)
                 if locked then return end
                 UseContainerItem(it.bag, it.slot)
+                job.moved = (job.moved or 0) + 1
                 table.remove(list, 1)
                 return
             end
@@ -96,9 +97,17 @@ runner:SetScript("OnUpdate", function(self, elapsed)
         self:Hide()
         local profit = GetMoney() - (job.startMoney or GetMoney())
         if profit > 0 then
-            print("|cff33aaff[GrimfallBags]|r Sold from '"..(job.catName or "?").."': +"..B.MoneyString(profit))
+            local sold = job.moved or 0
+            if job.catName then
+                print("|cff33aaff[GrimfallBags]|r Sold "..sold.." item"..(sold == 1 and "" or "s")
+                    .." from '"..job.catName.."': +"..B.MoneyString(profit))
+            else
+                print("|cff33aaff[GrimfallBags]|r Sold "..sold.." item"..(sold == 1 and "" or "s")
+                    ..": +"..B.MoneyString(profit))
+            end
         end
-        Log("Category sell finished")
+        if B.DiagLog then B.DiagLog("Category sell finished") else Log("Category sell finished") end
+        if B.RefreshAll then B.RefreshAll() end
         return
     end
 
@@ -128,7 +137,11 @@ runner:SetScript("OnUpdate", function(self, elapsed)
                     self:Hide()
                     return
                 end
-                PickupContainerItem(it.bag, it.slot)
+                if it.bag == -1 then
+                    PickupInventoryItem(BankButtonIDToInvSlotID(it.slot, false))
+                else
+                    PickupContainerItem(it.bag, it.slot)
+                end
                 PickupContainerItem(tBag, tSlot)
                 table.remove(list, 1)
                 job.moved = (job.moved or 0) + 1
@@ -143,7 +156,8 @@ runner:SetScript("OnUpdate", function(self, elapsed)
                 ..(job.protectedCount == 1 and "" or "s").." skipped)"
         end
         print("|cff33aaff[GrimfallBags]|r "..msg..".")
-        Log("Category deposit finished")
+        if B.DiagLog then B.DiagLog("Category deposit finished") else Log("Category deposit finished") end
+        if B.RefreshAll then B.RefreshAll() end
         return
     end
 
@@ -158,7 +172,10 @@ runner:SetScript("OnUpdate", function(self, elapsed)
         local msg
         if job.mode == "vendor" then
             local profit = GetMoney() - (job.startMoney or GetMoney())
-            if profit > 0 then msg = "Sold: +"..B.MoneyString(profit) end
+            local sold = job.moved or 0
+            if profit > 0 then
+                msg = "Sold "..sold.." item"..(sold == 1 and "" or "s")..": +"..B.MoneyString(profit)
+            end
         else
             local moved = job.moved or 0
             msg = "Moved "..moved.." item"..(moved == 1 and "" or "s")
@@ -168,7 +185,8 @@ runner:SetScript("OnUpdate", function(self, elapsed)
             end
         end
         if msg then print("|cff33aaff[GrimfallBags]|r "..msg..".") end
-        Log("Transfer finished")
+        if B.DiagLog then B.DiagLog("Transfer finished") else Log("Transfer finished") end
+        if B.RefreshAll then B.RefreshAll() end
         return
     end
 
@@ -205,7 +223,7 @@ local function StartJob(job)
     runner.job = job
     runner.t = 0
     runner:Show()
-    Log("Transfer started ("..job.mode..")")
+    if B.DiagLog then B.DiagLog("Transfer started ("..job.mode..")") else Log("Transfer started ("..job.mode..")") end
 end
 
 function B.IsTransferRunning()
@@ -248,7 +266,7 @@ local function StartBulkMove(data)
     }
     runner.t = 0
     runner:Show()
-    Log("Bulk move started ("..(data.mode or "move")..")")
+    if B.DiagLog then B.DiagLog("Bulk move started ("..(data.mode or "move")..")") else Log("Bulk move started ("..(data.mode or "move")..")") end
 end
 
 function B.DepositAll()
@@ -276,15 +294,22 @@ end
 
 local function StartMoveList(data)
     if runner:IsShown() then return end
+    local dstBags
+    if data.dest == "bank" then
+        dstBags = B.BANK_BAGS
+    elseif data.dest == "bags" then
+        dstBags = B.PLAYER_BAGS
+    end
     runner.job = {
         mode = "moveList", items = data.items,
-        dstBags = (data.dest == "bank") and B.BANK_BAGS or nil,
+        dstBags = dstBags,
         tab = (data.dest == "guild") and B.GuildBankAPI.GetCurrentTab() or nil,
         protectedCount = data.protectedCount,
     }
     runner.t = 0
     runner:Show()
-    Log("Category deposit started ("..(data.dest or "?")..")")
+    local verb = (data.dest == "bags") and "withdraw" or "deposit"
+    if B.DiagLog then B.DiagLog("Category "..verb.." started ("..(data.dest or "?")..")") else Log("Category "..verb.." started ("..(data.dest or "?")..")") end
 end
 
 function B.DepositCategory(items, catName, dest)
@@ -357,6 +382,22 @@ function B.SellCategoryConfirmed(items, catName)
     Log("Category sell started ('"..(catName or "?").."', "..#list.." items)")
 end
 
+function B.SellStacks(items)
+    if not atMerchant or not items or #items == 0 then return end
+    if runner:IsShown() then return end
+    local list = {}
+    for _, it in ipairs(items) do
+        if it.bag and it.slot and it.l then
+            list[#list+1] = {bag = it.bag, slot = it.slot, link = it.l}
+        end
+    end
+    if #list == 0 then return end
+    runner.job = {mode = "vendorList", items = list, startMoney = GetMoney()}
+    runner.t = 0
+    runner:Show()
+    Log("Stack sell started ("..#list.." items)")
+end
+
 StaticPopupDialogs["GFBAGS_SELL_CATEGORY"] = {
     text = "Sell all %d items in \"%s\" to the vendor?",
     button1 = SELL or "Sell",
@@ -378,7 +419,7 @@ StaticPopupDialogs["GFBAGS_MOVE_CONFIRM"] = {
 }
 
 StaticPopupDialogs["GFBAGS_DEPOSIT_CATEGORY"] = {
-    text = "Deposit %d items in \"%s\"?",
+    text = "Move %d items in \"%s\"?",
     button1 = YES or "Yes",
     button2 = CANCEL or "Cancel",
     OnAccept = function(self, data)
@@ -418,6 +459,8 @@ function B.UpdateTransferButtons()
     set(B.bankView, atBank, "Withdraw matching items into your bags")
 end
 
+local merchantStartMoney = 0
+
 local evt = CreateFrame("Frame")
 evt:RegisterEvent("MERCHANT_SHOW")
 evt:RegisterEvent("MERCHANT_CLOSED")
@@ -428,6 +471,7 @@ evt:RegisterEvent("MAIL_CLOSED")
 evt:SetScript("OnEvent", function(self, event)
     if event == "MERCHANT_SHOW" then
         atMerchant = true
+        merchantStartMoney = GetMoney()
         B.OpenBags()
         if B.Config().autoRepair then B.Guard("AutoRepair", DoAutoRepair) end
         if B.Config().autoSellJunk then
@@ -439,6 +483,11 @@ evt:SetScript("OnEvent", function(self, event)
     elseif event == "MERCHANT_CLOSED" then
         atMerchant = false
         runner:Hide()
+        local net = GetMoney() - merchantStartMoney
+        if net ~= 0 then
+            print("|cff33aaff[GrimfallBags]|r Merchant: "
+                ..(net > 0 and "+" or "-")..B.MoneyString(math.abs(net))..".")
+        end
     elseif event == "BANKFRAME_OPENED" then
         atBank = true
     elseif event == "BANKFRAME_CLOSED" then

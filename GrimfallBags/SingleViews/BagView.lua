@@ -317,6 +317,22 @@ function B.BuildBagView()
                               me.." - "..(BACKPACK_TOOLTIP or "Backpack"), B.PLAYER_BAGS)
     B.bagView = view
 
+    -- Secure toggle so the bag can be opened/closed in combat. The bag frame is
+    -- "protected" (its item buttons inherit SecureActionButtonTemplate), which
+    -- blocks Show/Hide from insecure code during combat. A SecureHandlerClick
+    -- button performs the toggle from the secure environment instead.
+    pcall(function()
+        local toggle = CreateFrame("Button", "GrimfallBagsBagToggle", UIParent, "SecureHandlerClickTemplate")
+        toggle:RegisterForClicks("AnyUp")
+        toggle:SetFrameRef("bagFrame", view.f)
+        toggle:SetAttribute("_onclick", [[
+            local f = self:GetFrameRef("bagFrame")
+            if f:IsShown() then f:Hide() else f:Show() end
+        ]])
+        SetOverrideBindingClick(toggle, false, "B", "GrimfallBagsBagToggle")
+        SetOverrideBindingClick(toggle, false, "SHIFT-B", "GrimfallBagsBagToggle")
+    end)
+
     B.AddToolbar(view, {
         isBank = false,
         buildCharMenu = BuildCharMenu,

@@ -442,10 +442,14 @@ evt:SetScript("OnEvent", function(self, event, arg1)
         if not frame then return end
         B.RestorePosition(frame, "GrimfallBagsGuildBank",
             {"TOPLEFT", UIParent, "TOPLEFT", 40, -80})
-        frame:Show()
         currentTab = B.GuildBankAPI.GetCurrentTab()
-        QueueTabQueries()
-        B.GuildBankView.Refresh()
+        -- Only mirror the guild-bank frame when we're replacing it; otherwise
+        -- ElvUI's/Blizzard's guild bank stays and ours would stack on top.
+        if B.Config().replaceGuildBank then
+            frame:Show()
+            QueueTabQueries()
+            B.GuildBankView.Refresh()
+        end
         Log("Guild bank opened (live)")
 
     elseif event == "GUILDBANKFRAME_CLOSED" then

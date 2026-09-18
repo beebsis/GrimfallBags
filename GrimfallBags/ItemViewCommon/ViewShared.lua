@@ -2,6 +2,11 @@ local B = GrimfallBags
 local S = Syndicator335
 local Log, Guard = B.Log, B.Guard
 
+local dirty = false
+local dirtyDebounce = 0
+local DIRTY_DEBOUNCE_TIME = 0.2
+local tooltipResyncPending = false
+
 -- Anchors GameTooltip to owner's upper-left, with the on-screen-safe offset
 -- computed here rather than via SetClampedToScreen (whose correction lands a
 -- frame late). Something outside our control -- proven by direct testing to
@@ -55,6 +60,39 @@ GameTooltip:HookScript("OnUpdate", function(self)
         end
     end
 end)
+
+StaticPopupDialogs["GFBAGS_SPLIT_STACK"] = {
+    text = "Split stack - amount:",
+    button1 = "Split",
+    button2 = CANCEL or "Cancel",
+    hasEditBox = 1,
+    OnAccept = function(self)
+        local eb = _G[self:GetName().."EditBox"]
+        local amount = tonumber(eb and eb:GetText())
+        if B.clickDebug then
+            B.Log("split-accept bag="..tostring(self.splitBag).." slot="..tostring(self.splitSlot)
+                .." amount="..tostring(amount))
+        end
+        if amount and amount >= 1 and self.splitBag and self.splitSlot then
+            if self.splitCount and amount > self.splitCount then amount = self.splitCount end
+            SplitContainerItem(self.splitBag, self.splitSlot, amount)
+        end
+    end,
+    EditBoxOnEnterPressed = function(self)
+        local d = self:GetParent()
+        local amount = tonumber(self:GetText())
+        if B.clickDebug then
+            B.Log("split-enter bag="..tostring(d.splitBag).." slot="..tostring(d.splitSlot)
+                .." amount="..tostring(amount))
+        end
+        if amount and amount >= 1 and d.splitBag and d.splitSlot then
+            if d.splitCount and amount > d.splitCount then amount = d.splitCount end
+            SplitContainerItem(d.splitBag, d.splitSlot, amount)
+            d:Hide()
+        end
+    end,
+    timeout = 0, whileDead = 1, hideOnEscape = 1,
+}
 
 local COLS, BTN = 12, 37
 local BTN_PAD   = 2
@@ -344,40 +382,52 @@ local function AcquireButton(view, bag)
             -- purely so GetAnchorType() never reports ANCHOR_NONE; AnchorItemTooltip
             -- overrides the actual position unconditionally right after.
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            -- SetBagItem(-1, slot) never works here; Blizzard's own bank frame
-            -- uses BankButtonIDToInvSlotID + SetInventoryItem for these slots
-            -- instead of the generic container API, so mirror that.
-            if self.bag == -1 then
-                Guard("BankSlotTooltip", function()
-                    local invSlot = BankButtonIDToInvSlotID(self:GetID(), false)
-                    GameTooltip:SetInventoryItem("player", invSlot)
-                end)
-            else
+            -- Always show the tile's CACHED link instead of reading the live slot
+            -- (SetBagItem / SetInventoryItem). The live slot races with a deposit
+            -- and the server sync that follows it, which is what made the tooltip
+            -- show a "random" item that no longer matched the icon. SetHyperlink
+            -- therefore always agrees with the icon under the cursor.
+            -- Diagnostic: log every genuine hover with the tile's cached link and
+            -- the LIVE slot content, flagged when they disagree -- that mismatch is
+            -- the "tooltip shows a different item than the slot" desync.
+            -- (GetContainerItemLink reads the client's current container state.)
+            local liveLink = GetContainerItemLink(self.bag, self:GetID())
+            if B.DiagLog then
+                local cached = self.link and self.link:match("%[(.-)%]") or "nil"
+                local live = liveLink and liveLink:match("%[(.-)%]") or "nil"
+                local flag = (self.link and liveLink and S.ItemID(self.link) ~= S.ItemID(liveLink))
+                    and "  <-- MISMATCH" or ""
+                B.DiagLog("hover bag="..tostring(self.bag).." slot="..tostring(self:GetID())
+                    .." ["..cached.."] live=["..live.."]"..flag)
+            end
+            if self.link then
                 Guard("BagItemTooltip", function()
-                    GameTooltip:SetBagItem(self.bag, self:GetID())
+                    GameTooltip:SetHyperlink(self.link)
                 end)
+                if self.displayCount and self.displayCount > 1 then
+                    GameTooltip:AddLine("|cffffffffStack:|r "..self.displayCount)
+                end
             end
             if GameTooltip:NumLines() == 0 then
-                if self.link then
-                    Guard("BagItemTooltipFallback", function()
-                        GameTooltip:SetHyperlink(self.link)
-                    end)
-                end
-                if GameTooltip:NumLines() == 0 then
-                    GameTooltip:Hide()
-                    return
-                end
+                GameTooltip:Hide()
+                return
             end
             AnchorItemTooltip(self)
             GameTooltip:Show()
         end)
         btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        -- Capture the spell-targeting state BEFORE the secure OnClick runs: the
+        -- secure handler (target-bag/target-slot) consumes the Disenchant /
+        -- Prospecting / Milling cursor, so by the time our OnClick runs,
+        -- SpellIsTargeting() is already false and we'd wrongly pick up the item.
+        btn:SetScript("PreClick", function(self)
+            self.gbSpellTargeting = (SpellIsTargeting() or GetCursorInfo() == "spell") and true or false
+        end)
         -- HookScript (not SetScript) so we append to, rather than replace, the
         -- template's OnClick. SecureActionButtonTemplate overrides the container
         -- template's own auto-pickup; our handler does the real work.
         btn:HookScript("OnClick", function(self, button)
             local isModifier = IsModifiedClick("CHATLINK") or IsModifiedClick("DRESSUP")
-                               or IsModifiedClick("SOCKETINFO")
             local function Call(fn, ...)
                 local ok, err = pcall(fn, ...)
                 if B.clickDebug then
@@ -402,30 +452,60 @@ local function AcquireButton(view, bag)
                     tostring(cdStart), tostring(cdDur),
                     tostring(UnitIsDeadOrGhost("player")), tostring(InCombatLockdown())))
             end
-            if button == "LeftButton" and IsShiftKeyDown() then
-                if B.clickDebug then B.Log("click-action: ignore-slot") end
-                B.ToggleIgnoredSlot(self.bag, self:GetID())
-                return
-            end
             if button == "RightButton" then
-                -- Consumables / on-use items are handled by the secure action
-                -- (type2="item" + item2). Equippable gear falls back to a direct
-                -- UseContainerItem call here: equipping is allowed from addon Lua
-                -- out of combat, and two-handed weapons failed to equip through
-                -- the secure path. Bank containers can't be used in place.
+                -- Right-click:
+                --   player bags (0-4): consumables use the secure action
+                --     (type2="item"); equippable gear equips via a direct call.
+                --   bank (-1 and 5-11): withdraw the item into the bags.
                 if B.clickDebug then B.Log("click-action: right-click use") end
                 GameTooltip:Hide()
-                if not InCombatLockdown() and self.isEquip
-                   and self.bag and self.bag >= 0 and self.bag <= 4 then
+                if B.IsAtMerchant and B.IsAtMerchant() and self.mergedStacks and #self.mergedStacks > 1 then
+                    -- At a merchant, selling a merged tile sells every stack in it.
+                    B.SellStacks(self.mergedStacks)
+                elseif self.bag == -1 or (self.bag and self.bag >= 5) then
+                    -- Bank containers (-1 main bank, 5-11 bank bags): withdraw
+                    -- the item into the bags. UseContainerItem is protected but
+                    -- is allowed to move items to/from the bank while it's open.
+                    Call(UseContainerItem, self.bag, self:GetID())
+                elseif not InCombatLockdown() and self.isEquip then
+                    -- Player bag (0-4), equippable gear: equip.
                     Call(UseContainerItem, self.bag, self:GetID())
                 end
                 return
+            end
+            -- Shift+left click a stackable item: split the stack (default WoW
+            -- behaviour) via an amount dialog.
+            if button == "LeftButton" and IsShiftKeyDown() then
+                local _, count = GetContainerItemInfo(self.bag, self:GetID())
+                if count and count > 1 then
+                    if B.clickDebug then B.Log("click-action: split stack") end
+                    GameTooltip:Hide()
+                    local d = StaticPopup_Show("GFBAGS_SPLIT_STACK")
+                    if d then
+                        d.splitBag, d.splitSlot, d.splitCount = self.bag, self:GetID(), count
+                        local eb = _G[d:GetName().."EditBox"]
+                        if eb then
+                            eb:SetText(tostring(count))
+                            eb:HighlightText()
+                            eb:SetFocus()
+                        end
+                    end
+                    return
+                end
             end
             -- Left-click modified actions (link / dress-up), then plain pickup.
             if isModifier and self.link then
                 if B.clickDebug then B.Log("click-action: modified left-click") end
                 if IsModifiedClick("CHATLINK") then ChatEdit_InsertLink(self.link)
                 elseif IsModifiedClick("DRESSUP") then DressUpItemLink(self.link) end
+                return
+            end
+            -- Left-click: the secure action (target-bag/target-slot) applies a
+            -- targeting spell (Disenchant, Prospecting, Milling) to this item;
+            -- skip the pickup so we don't grab it. gbSpellTargeting was captured
+            -- in PreClick, before the secure handler consumed the cursor.
+            if self.gbSpellTargeting then
+                if B.clickDebug then B.Log("click-action: spell targeting (secure)") end
                 return
             end
             -- Left-click pickup (not a protected action, so plain Lua is fine).
@@ -511,6 +591,7 @@ local function ShowHeaderMenu(h)
     headerMenu = headerMenu or CreateFrame("Frame", "GrimfallBagsHeaderMenu", UIParent, "UIDropDownMenuTemplate")
     local n = (h.items and #h.items) or 0
     local protected = B.IsCategoryProtected and B.IsCategoryProtected(h.cat) or false
+    local isBankView = B.bankView and h:GetParent() == B.bankView.f
     local canSell  = (not protected) and n > 0 and B.IsAtMerchant and B.IsAtMerchant()
     local canBank  = (not protected) and n > 0 and B.IsAtBank and B.IsAtBank()
     local canGuild = (not protected) and n > 0
@@ -520,8 +601,9 @@ local function ShowHeaderMenu(h)
         {text = h.cat or "Category", isTitle = true, notCheckable = true},
         {text = "Sell"..suffix, notCheckable = true, disabled = not canSell,
          func = function() B.SellCategory(h.items, h.cat) end},
-        {text = "Deposit to bank"..suffix, notCheckable = true, disabled = not canBank,
-         func = function() B.DepositCategory(h.items, h.cat, "bank") end},
+        {text = (isBankView and "Withdraw to bags" or "Deposit to bank")..suffix,
+         notCheckable = true, disabled = not canBank,
+         func = function() B.DepositCategory(h.items, h.cat, isBankView and "bags" or "bank") end},
         {text = "Deposit to guild bank"..suffix, notCheckable = true, disabled = not canGuild,
          func = function() B.DepositCategory(h.items, h.cat, "guild") end},
         {text = CANCEL or "Cancel", notCheckable = true, func = function() end},
@@ -698,39 +780,13 @@ end
 
 function B.InvalidateCrossCharCounts()
     wipe(crossCharCountCache)
-    B.RefreshAll()
-end
-
-function B.IsSlotIgnored(bag, slot)
-    local set = B.Config().ignoredSlots
-    return set and set[bag..":"..slot] == true
-end
-
-function B.ToggleIgnoredSlot(bag, slot)
-    local cfg = B.Config()
-    cfg.ignoredSlots = cfg.ignoredSlots or {}
-    local key = bag..":"..slot
-    if cfg.ignoredSlots[key] then
-        cfg.ignoredSlots[key] = nil
+    if B.UpdateCrossCharBadges then
+        -- Only the badge totals changed; a full re-layout here would reorder
+        -- the tiles for no reason (the wrong-tooltip bug). Refresh the badges
+        -- in place instead.
+        B.UpdateCrossCharBadges()
     else
-        cfg.ignoredSlots[key] = true
-    end
-    B.RefreshAll()
-end
-
-local function ApplyIgnoreDot(btn, bag, slot)
-    if not btn.ignoreDot then
-        local t = btn:CreateTexture(nil, "OVERLAY")
-        t:SetSize(8, 8)
-        t:SetPoint("TOP", btn, "TOP", 0, -1)
-        t:SetTexture(1, 0.78, 0.15, 0.95)
-        t:Hide()
-        btn.ignoreDot = t
-    end
-    if B.IsSlotIgnored(bag, slot) then
-        btn.ignoreDot:Show()
-    else
-        btn.ignoreDot:Hide()
+        B.RefreshAll()
     end
 end
 
@@ -755,6 +811,74 @@ local function ApplyCountBadge(btn, link)
     btn.countBadge:Hide()
 end
 
+-- Re-applies the cross-character count badges to the already-placed buttons of
+-- the bag and bank views without re-laying-out anything. Used when the counts
+-- change (S.OnDataChanged) so the tiles don't reshuffle under the cursor.
+function B.UpdateCrossCharBadges()
+    for _, view in ipairs({B.bagView, B.bankView}) do
+        if view then
+            for i = 1, (view.nBtn or 0) do
+                local btn = view.buttons and view.buttons[i]
+                if btn and btn.link then ApplyCountBadge(btn, btn.link) end
+            end
+            for i = 1, (view.nOBtn or 0) do
+                local btn = view.obuttons and view.obuttons[i]
+                if btn and btn.link then ApplyCountBadge(btn, btn.link) end
+            end
+        end
+    end
+end
+
+-- Re-anchors the item tooltip to whichever of our buttons is actually under the
+-- cursor right now, or hides it if none is. RefreshImpl calls this after every
+-- re-layout so a tooltip can never stay pointed at a tile whose item moved out
+-- from under it.
+function B.RefreshHoverTooltip()
+    if not GameTooltip:IsShown() then return end
+    local owner = GameTooltip:GetOwner()
+    if not (owner and owner.gbItemTip) then return end
+
+    local hoverBtn
+    for _, view in ipairs({B.bagView, B.bankView}) do
+        if view and view.f:IsShown() then
+            for i = 1, (view.nBtn or 0) do
+                local btn = view.buttons and view.buttons[i]
+                if btn and btn:IsShown() and btn:IsMouseOver() then
+                    hoverBtn = btn
+                    break
+                end
+            end
+            if not hoverBtn then
+                for i = 1, (view.nOBtn or 0) do
+                    local btn = view.obuttons and view.obuttons[i]
+                    if btn and btn:IsShown() and btn:IsMouseOver() then
+                        hoverBtn = btn
+                        break
+                    end
+                end
+            end
+        end
+        if hoverBtn then break end
+    end
+
+    if hoverBtn and hoverBtn:GetScript("OnEnter") then
+        -- Re-anchor when the button under the cursor changed, OR re-set when its
+        -- item changed. Skipping the re-anchor when the new button's link was
+        -- unchanged left the tooltip on the OLD button (e.g. still showing a
+        -- recipe while the cursor now sits on cloth) -- the "random item" bug.
+        if hoverBtn ~= owner or hoverBtn.tooltipLink ~= hoverBtn.link then
+            if hoverBtn ~= owner and B.DiagLog then
+                B.DiagLog("tip-reanchor "..(owner:GetName() or "?").." -> "..hoverBtn:GetName()
+                    .." item=["..(hoverBtn.link and hoverBtn.link:match("%[(.-)%]") or "?").."]")
+            end
+            hoverBtn.tooltipLink = nil
+            hoverBtn:GetScript("OnEnter")(hoverBtn)
+        end
+    else
+        GameTooltip:Hide()
+    end
+end
+
 local function SetSecureItem(btn, bag, slot, isEquip)
     if InCombatLockdown() then
         btn.securePending = true
@@ -762,24 +886,51 @@ local function SetSecureItem(btn, bag, slot, isEquip)
         return
     end
     btn.securePending = nil
-    -- Only non-equippable player-bag items (consumables, on-use items) use the
-    -- secure action. Equippable gear is handled by the direct UseContainerItem
-    -- fallback in the OnClick handler (two-handed weapons failed to equip via
-    -- the secure path). Bank containers (-1, 5-11) can't be used in place.
-    if bag and bag >= 0 and bag <= 4 and slot and not isEquip then
-        local val = bag.." "..slot
-        if btn.secureItem ~= val then
-            btn.secureItem = val
-            btn:SetAttribute("item2", val)
+    -- Player bags (0-4):
+    --   target-bag/target-slot lets the game's secure click handling apply an
+    --   item-targetable spell (Disenchant, Prospecting, Milling) to this item.
+    --   item2 (with type2="item") is the right-click "use" for non-equippable
+    --   items; equippable gear equips via the direct UseContainerItem fallback
+    --   in the OnClick handler (two-handed weapons failed via the secure path).
+    -- Bank containers (-1, 5-11) can't be used or disenchanted in place.
+    if bag and bag >= 0 and bag <= 4 and slot then
+        if btn.targetBag ~= bag then
+            btn.targetBag = bag
+            btn:SetAttribute("target-bag", bag)
         end
-    elseif btn.secureItem then
-        btn.secureItem = nil
-        btn:SetAttribute("item2", nil)
+        if btn.targetSlot ~= slot then
+            btn.targetSlot = slot
+            btn:SetAttribute("target-slot", slot)
+        end
+        if not isEquip then
+            local val = bag.." "..slot
+            if btn.secureItem ~= val then
+                btn.secureItem = val
+                btn:SetAttribute("item2", val)
+            end
+        elseif btn.secureItem then
+            btn.secureItem = nil
+            btn:SetAttribute("item2", nil)
+        end
+    else
+        if btn.targetBag then
+            btn.targetBag = nil
+            btn:SetAttribute("target-bag", nil)
+        end
+        if btn.targetSlot then
+            btn.targetSlot = nil
+            btn:SetAttribute("target-slot", nil)
+        end
+        if btn.secureItem then
+            btn.secureItem = nil
+            btn:SetAttribute("item2", nil)
+        end
     end
 end
 
 local function FillLiveButton(btn, bag, slot, query, countOverride)
     btn:SetID(slot)
+    btn.mergedStacks = nil
     local texture, count, locked, quality = GetContainerItemInfo(bag, slot)
     local link = GetContainerItemLink(bag, slot)
     if link ~= GetContainerItemLink(bag, slot) then
@@ -802,6 +953,7 @@ local function FillLiveButton(btn, bag, slot, query, countOverride)
     -- everything else here (texture/border/lock/cooldown) still reflects this
     -- specific slot, only the displayed/searched count changes.
     count = countOverride or count
+    btn.displayCount = count
 
     -- Derive the icon from the link itself rather than the separately
     -- fetched texture above; the two calls can race during rapid bag/bank
@@ -818,7 +970,6 @@ local function FillLiveButton(btn, bag, slot, query, countOverride)
     ApplyILvl(btn, link, quality)
     ApplyTmogDot(btn, link)
     ApplyCountBadge(btn, link)
-    ApplyIgnoreDot(btn, bag, slot)
 
     local cd = _G[btn:GetName().."Cooldown"]
     if cd then
@@ -985,10 +1136,20 @@ local function RefreshImpl(view)
                 local b = buckets[id]
                 local total = 0
                 for _, it in ipairs(b) do total = total + (it.c or 0) end
-                table.sort(b, function(a, bb) return (a.c or 0) > (bb.c or 0) end)
+                -- Sort by count desc, then by bag/slot ascending so the chosen
+                -- representative (the physical stack the merged tile points at)
+                -- is deterministic even when two stacks hold equal counts.
+                -- Lua 5.1's table.sort is unstable, so without the tiebreakers
+                -- the tile could flip between two equal stacks each refresh.
+                table.sort(b, function(a, bb)
+                    if (a.c or 0) ~= (bb.c or 0) then return (a.c or 0) > (bb.c or 0) end
+                    if (a.bag or 0) ~= (bb.bag or 0) then return (a.bag or 0) < (bb.bag or 0) end
+                    return (a.slot or 0) < (bb.slot or 0)
+                end)
                 local rep = b[1]
                 rep.mergedCount = total
                 rep.c = total -- FillOfflineButton reads .c directly (no countOverride param there)
+                rep.mergedStacks = b
                 out[#out+1] = rep
             end
             groups[cat] = out
@@ -1126,6 +1287,7 @@ local function RefreshImpl(view)
             else
                 btn = AcquireButton(view, it.bag)
                 FillLiveButton(btn, it.bag, it.slot, it.isEmpty and "" or query, it.mergedCount)
+                btn.mergedStacks = it.mergedStacks
                 if it.isEmpty then
                     local cnt = _G[btn:GetName().."Count"]
                     if cnt then cnt:SetText(it.free); cnt:Show() end
@@ -1138,8 +1300,16 @@ local function RefreshImpl(view)
         local function SellableItems(items)
             local out = {}
             for _, it in ipairs(items) do
-                if it.bag and it.slot and it.l and not it.offline and not it.isEmpty then
-                    out[#out+1] = {bag = it.bag, slot = it.slot, link = it.l}
+                if not it.offline and not it.isEmpty then
+                    if it.mergedStacks then
+                        for _, s in ipairs(it.mergedStacks) do
+                            if s.bag and s.slot and s.l then
+                                out[#out+1] = {bag = s.bag, slot = s.slot, link = s.l}
+                            end
+                        end
+                    elseif it.bag and it.slot and it.l then
+                        out[#out+1] = {bag = it.bag, slot = it.slot, link = it.l}
+                    end
                 end
             end
             return out
@@ -1212,6 +1382,12 @@ local function RefreshImpl(view)
     for i = view.nOBtn + 1, prevOBtn do view.obuttons[i]:Hide() end
     for i = view.nHdr  + 1, prevHdr  do view.headers[i]:Hide()  end
     for i = view.nSHdr + 1, prevSHdr do view.sheaders[i]:Hide() end
+
+    -- The layout just changed. Defer the re-point by one frame: IsMouseOver()
+    -- would otherwise see the PRE-layout button positions (SetPoint anchors
+    -- aren't resolved into pixel bounds until the next layout pass), so it could
+    -- pick the wrong tile and re-anchor the tooltip to a "random" item.
+    tooltipResyncPending = true
 end
 
 function B.RefreshView(view)
@@ -1349,14 +1525,23 @@ local function DisableElvUIBags()
     if IsAddOnLoaded("ElvUI") then
         pcall(function()
             local E = unpack(ElvUI)
-            if E.private and E.private.bags then
-                E.private.bags.enable = false
-                disabled = true
+            if E.private then
+                if E.private.bags then
+                    E.private.bags.enable = false
+                    disabled = true
+                end
+                if E.private.bank then
+                    E.private.bank.enable = false
+                    disabled = true
+                end
             end
         end)
     end
     if disabled then
-        print("|cff33aaff[GrimfallBags]|r Disabled ElvUI's bags/bank windows - /reload to apply.")
+        -- Reload immediately so ElvUI's bags/bank modules unload cleanly.
+        -- Leaving the flag off while the module is still loaded makes ElvUI's
+        -- own OpenBags error on a nil frame (SetSearch on a missing search bar).
+        ReloadUI()
     end
     return disabled
 end
@@ -1366,7 +1551,10 @@ local function ElvUIBagsStillEnabled()
     if not IsAddOnLoaded("ElvUI") then return false end
     local ok, enabled = pcall(function()
         local E = unpack(ElvUI)
-        return E.private and E.private.bags and E.private.bags.enable
+        if not E.private then return false end
+        if E.private.bags and E.private.bags.enable then return true end
+        if E.private.bank and E.private.bank.enable then return true end
+        return false
     end)
     return ok and enabled
 end
@@ -1417,12 +1605,14 @@ evt:RegisterEvent("BANKFRAME_CLOSED")
 evt:RegisterEvent("CURRENCY_DISPLAY_UPDATE")
 evt:RegisterEvent("PLAYER_REGEN_ENABLED")
 
-local dirty = false
-local dirtyDebounce = 0
-local DIRTY_DEBOUNCE_TIME = 0.2
 local expireTick = 0
 local resizeTick = 0
 evt:SetScript("OnUpdate", function(self, elapsed)
+    if tooltipResyncPending then
+        tooltipResyncPending = false
+        B.RefreshHoverTooltip()
+    end
+
     local bagView, bankView = B.bagView, B.bankView
     if not bagView then return end
     expireTick = expireTick + (elapsed or 0)
@@ -1488,6 +1678,9 @@ evt:SetScript("OnEvent", function(self, event)
 
     elseif event == "BAG_UPDATE" or event == "ITEM_LOCK_CHANGED"
         or event == "BAG_UPDATE_COOLDOWN" or event == "PLAYERBANKSLOTS_CHANGED" then
+        if (event == "BAG_UPDATE" or event == "PLAYERBANKSLOTS_CHANGED") and B.DiagLog then
+            B.DiagLog("move event="..event)
+        end
         dirty = true
         dirtyDebounce = 0
 
@@ -1503,11 +1696,15 @@ evt:SetScript("OnEvent", function(self, event)
         end
 
     elseif event == "BANKFRAME_OPENED" then
-        if B.bankView then
-            B.bankView.f:Show()
-            B.RefreshView(B.bankView)
+        -- Only mirror the bank frame when we're replacing it; if the user kept
+        -- ElvUI's/Blizzard's bank, showing ours too would stack two windows.
+        if B.Config().replaceBank then
+            if B.bankView then
+                B.bankView.f:Show()
+                B.RefreshView(B.bankView)
+            end
+            if B.Config().replaceBags then B.OpenBags() end
         end
-        B.OpenBags()
         if B.UpdateTransferButtons then B.UpdateTransferButtons() end
 
     elseif event == "BANKFRAME_CLOSED" then

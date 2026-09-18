@@ -1,7 +1,7 @@
 local B = GrimfallBags
 local S = Syndicator335
 
-B.RECENT_LABEL = "Neu"
+B.RECENT_LABEL = "New"
 
 function B.GetItemTags(link)
     local _, _, _, _, _, itemType, subType, _, equipLoc = GetItemInfo(link or "")
@@ -17,22 +17,49 @@ function B.GetItemTags(link)
     return tags
 end
 
+-- Another tooltip addon may already print an item ID (EllesmereUI uses
+-- "ItemID", Questie has its own toggle, ...). Detect an existing line so we
+-- never show two - the same guard EllesmereUI itself uses.
+local function TooltipHasItemIDLine(tt)
+    local name = tt:GetName()
+    if not name then return false end
+    for i = 1, tt:NumLines() do
+        local left  = _G[name.."TextLeft"..i]
+        local right = _G[name.."TextRight"..i]
+        for _, region in ipairs({left, right}) do
+            local text = region and region:GetText()
+            if text then
+                text = text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):lower()
+                if text:find("item%s*id") then return true end
+            end
+        end
+    end
+    return false
+end
+
 local function ShowItemTooltipInfo(tt, link)
     local shown = false
-    local id = S.ItemID(link)
-    if id then
-        tt:AddLine("|cff33aaffItem ID:|r "..id, 1, 1, 1)
-        shown = true
+    local cfg = B.Config()
+    if cfg.showItemID and not TooltipHasItemIDLine(tt) then
+        local id = S.ItemID(link)
+        if id then
+            tt:AddLine("|cff33aaffItem ID:|r "..id, 1, 1, 1)
+            shown = true
+        end
     end
-    local tags = B.GetItemTags(link)
-    if #tags > 0 then
-        tt:AddLine("|cff33aaffGrimfallBags tags:|r "..table.concat(tags, ", "), 1, 1, 1, true)
-        shown = true
+    if cfg.showTags then
+        local tags = B.GetItemTags(link)
+        if #tags > 0 then
+            tt:AddLine("|cff33aaffGrimfallBags tags:|r "..table.concat(tags, ", "), 1, 1, 1, true)
+            shown = true
+        end
     end
-    local cat = B.Categorize({l = link})
-    if cat and cat ~= "" then
-        tt:AddLine("|cff33aaffCategory:|r "..cat, 1, 1, 1)
-        shown = true
+    if cfg.showCategory then
+        local cat = B.Categorize({l = link})
+        if cat and cat ~= "" then
+            tt:AddLine("|cff33aaffCategory:|r "..cat, 1, 1, 1)
+            shown = true
+        end
     end
     if B.IsItemSellProtected and B.IsItemSellProtected(link) then
         tt:AddLine("|cffff8888Protected - skipped by category/bulk sell|r", 1, 1, 1, true)
@@ -41,23 +68,14 @@ local function ShowItemTooltipInfo(tt, link)
     if shown then tt:Show() end
 end
 
-hooksecurefunc(GameTooltip, "SetBagItem", function(tt)
-    B.Guard("TooltipHook:SetBagItem", function()
+-- Add our info (item ID, tags, category) once per item. OnTooltipSetItem fires
+-- exactly once per item, unlike hooking the individual SetBagItem /
+-- SetInventoryItem / SetHyperlink methods, which can each run for the same item
+-- and would duplicate the lines.
+GameTooltip:HookScript("OnTooltipSetItem", function(tt)
+    B.Guard("TooltipInfo", function()
         local _, link = tt:GetItem()
         if link then ShowItemTooltipInfo(tt, link) end
-    end)
-end)
-hooksecurefunc(GameTooltip, "SetInventoryItem", function(tt)
-    B.Guard("TooltipHook:SetInventoryItem", function()
-        local _, link = tt:GetItem()
-        if link then ShowItemTooltipInfo(tt, link) end
-    end)
-end)
-hooksecurefunc(GameTooltip, "SetHyperlink", function(tt, link)
-    B.Guard("TooltipHook:SetHyperlink", function()
-        if not link then return end
-        local _, itemLink = tt:GetItem()
-        if itemLink then ShowItemTooltipInfo(tt, itemLink) end
     end)
 end)
 

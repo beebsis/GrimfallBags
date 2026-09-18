@@ -1,7 +1,7 @@
 local B = {}
 _G["GrimfallBags"] = B
 
-B.VERSION = "2.0.0"
+B.VERSION = "2.1.0"
 
 BINDING_HEADER_GRIMFALLBAGS = "Grimfall Bags"
 BINDING_NAME_GFBAGS_TOGGLEBAGS = "Toggle Bags"
@@ -17,6 +17,106 @@ function B.Log(msg)
     local t = B.log
     t[#t+1] = date("%H:%M:%S").."  "..tostring(msg)
     if #t > LOG_MAX then table.remove(t, 1) end
+end
+
+-- Live diagnostic window. Created lazily on first use so it can share the
+-- addon's window chrome (B.StyleWindow / B.MakeMovable live in WindowChrome.lua,
+-- which loads after Core.lua). The body is a chat-style ScrollingMessageFrame
+-- (native wheel scroll); a "Copy" button opens a selectable EditBox with the
+-- full text so it can be copied. Toggle: /gfbags diag.
+local DIAG_MAX_LINES = 500
+local diagLines = {}
+local diagFrame, diagScroll, copyFrame, copyEdit
+
+local function DiagEnsure()
+    if diagFrame then return end
+
+    diagFrame = CreateFrame("Frame", "GrimfallBagsDiag", UIParent)
+    diagFrame:SetSize(520, 300)
+    diagFrame:SetPoint("CENTER", UIParent, "CENTER", 0, -40)
+    diagFrame:SetFrameStrata("DIALOG")
+    if B.StyleWindow then B.StyleWindow(diagFrame) end
+    if B.MakeMovable then B.MakeMovable(diagFrame, "GrimfallBagsDiag") end
+
+    local title = diagFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOPLEFT", diagFrame, "TOPLEFT", 8, -6)
+    title:SetText("|cff33aaffGrimfallBags|r diagnostics  (wheel to scroll, /gfbags diag to close)")
+
+    -- Chat-style scrolling message frame: reliable wheel scroll.
+    diagScroll = CreateFrame("ScrollingMessageFrame", "GrimfallBagsDiagText", diagFrame)
+    diagScroll:SetPoint("TOPLEFT", diagFrame, "TOPLEFT", 8, -26)
+    diagScroll:SetPoint("BOTTOMRIGHT", diagFrame, "BOTTOMRIGHT", -8, -34)
+    diagScroll:SetFontObject(GameFontNormalSmall)
+    diagScroll:SetMaxLines(500)
+    diagScroll:SetFading(false)
+    diagScroll:SetJustifyH("LEFT")
+    diagScroll:SetScript("OnMouseWheel", function(self, delta)
+        if delta > 0 then self:ScrollUp() else self:ScrollDown() end
+    end)
+
+    -- Copy button: opens a selectable EditBox with the full log.
+    local copyBtn = CreateFrame("Button", nil, diagFrame, "UIPanelButtonTemplate")
+    copyBtn:SetWidth(64); copyBtn:SetHeight(22)
+    copyBtn:SetPoint("BOTTOMRIGHT", diagFrame, "BOTTOMRIGHT", -8, 7)
+    copyBtn:SetText("Copy")
+    copyBtn:SetScript("OnClick", function()
+        DiagEnsure()
+        if not copyEdit then return end
+        copyEdit:SetText(#diagLines > 0 and table.concat(diagLines, "\n") or "(empty)")
+        copyEdit:HighlightText()
+        copyFrame:Show()
+        copyEdit:SetFocus()
+    end)
+    if B.SkinButton then B.SkinButton(copyBtn) end
+
+    -- Copy popup.
+    copyFrame = CreateFrame("Frame", "GrimfallBagsDiagCopy", UIParent)
+    copyFrame:SetSize(520, 300)
+    copyFrame:SetPoint("CENTER")
+    copyFrame:SetFrameStrata("DIALOG")
+    if B.StyleWindow then B.StyleWindow(copyFrame) end
+    if B.MakeMovable then B.MakeMovable(copyFrame, "GrimfallBagsDiagCopy") end
+
+    local copyTitle = copyFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    copyTitle:SetPoint("TOPLEFT", copyFrame, "TOPLEFT", 8, -6)
+    copyTitle:SetText("|cff33aaffGrimfallBags|r diagnostics - Ctrl+A then Ctrl+C to copy, Esc to close")
+
+    copyEdit = CreateFrame("EditBox", "GrimfallBagsDiagCopyEdit", copyFrame)
+    copyEdit:SetMultiLine(true)
+    copyEdit:SetAutoFocus(false)
+    copyEdit:SetFontObject(GameFontNormalSmall)
+    copyEdit:SetTextColor(1, 1, 1)
+    copyEdit:SetTextInsets(4, 4, 4, 4)
+    copyEdit:SetMaxLetters(0)
+    copyEdit:SetPoint("TOPLEFT", copyFrame, "TOPLEFT", 8, -26)
+    copyEdit:SetPoint("BOTTOMRIGHT", copyFrame, "BOTTOMRIGHT", -8, 8)
+    copyEdit:SetScript("OnEscapePressed", function() copyFrame:Hide() end)
+
+    copyFrame:Hide()
+    diagFrame:Hide()
+end
+
+function B.DiagLog(msg)
+    DiagEnsure()
+    local line = date("%H:%M:%S").."  "..tostring(msg)
+    diagLines[#diagLines + 1] = line
+    while #diagLines > DIAG_MAX_LINES do table.remove(diagLines, 1) end
+    if diagScroll then diagScroll:AddMessage(line, 1, 1, 1) end
+    B.Log(msg)
+end
+
+function B.ToggleDiag()
+    DiagEnsure()
+    if diagFrame:IsShown() then
+        diagFrame:Hide()
+        print("|cff33aaff[GrimfallBags]|r Diagnostics window hidden.")
+    else
+        if #diagLines == 0 and diagScroll then
+            diagScroll:AddMessage("|cff888888(no diagnostic events yet - run a transfer or hover items)|r", 1, 1, 1)
+        end
+        diagFrame:Show()
+        print("|cff33aaff[GrimfallBags]|r Diagnostics window shown - drag it clear of the bags.")
+    end
 end
 
 function B.Guard(label, fn, ...)
@@ -38,6 +138,9 @@ local DEFAULTS = {
     greyJunk     = true,
     showILvl     = true,
     showCrossCharCount = true,
+    showItemID   = true,
+    showTags     = true,
+    showCategory = true,
     mergeStacks  = true,
     recentSecs   = 120,
     sortMethod   = "type",
@@ -57,7 +160,6 @@ local DEFAULTS = {
     sections     = {},
     hiddenCats   = {},
     sectionCollapsed = {},
-    ignoredSlots = {},
     profiles     = {},
 }
 
@@ -96,6 +198,8 @@ SlashCmdList["GrimfallBags"] = function(msg)
         wipe(B.log)
         B.errorNotified = nil
         print("|cff33aaff[GrimfallBags]|r Log cleared.")
+    elseif msg == "diag" or msg == "diaglog" or msg == "diagwindow" then
+        if B.ToggleDiag then B.ToggleDiag() end
     elseif msg == "clickdebug" then
         B.clickDebug = not B.clickDebug
         B.Log("clickdebug "..(B.clickDebug and "ON" or "OFF"))
